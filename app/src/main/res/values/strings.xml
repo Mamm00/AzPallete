@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Al AzharTex Shade Cart</string>
+    <string name="brand_title">Al AzharTex</string>
+    <string name="brand_subtitle">Fine Fabrics · Digital Shade Cart</string>
+    <string name="logo_content_description">Al AzharTex Fine Fabrics emblem</string>
+    <string name="tab_shade_cart">Shade Cart</string>
+    <string name="tab_capture">Capture</string>
+    <string name="tab_palette">Palette</string>
+    <string name="camera_rationale_title">Camera Access Needed</string>
+    <string name="camera_rationale_body">Al AzharTex uses your camera to photograph physical A4 fabric shade carts and extract swatch colors and numeric labels. You can also upload an existing photo from your gallery.</string>
+    <string name="camera_permanently_denied_body">Camera access is permanently denied. Open system app settings to enable Camera permission, or upload a shade cart photo from your gallery.</string>
+    <string name="grant_camera_permission">Allow Camera</string>
+    <string name="open_settings">Open Settings</string>
+    <string name="upload_from_gallery">Upload Photo</string>
+    <string name="load_sample_cart">Load Sample A4 Cart</string>
+    <string name="no_swatches_title">No Swatches Yet</string>
+    <string name="no_swatches_body">This digital shade cart has no color swatches recorded. Detect swatches from a captured card or add them manually.</string>
+    <string name="add_swatch_manually">Add swatch manually</string>
+    <string name="mlkit_model_missing_title">Background Removal Model Not Downloaded</string>
+    <string name="mlkit_model_missing_body">ML Kit Subject Segmentation needs a one-time on-device model download. Until it is ready, you can continue with crop-only editing.</string>
+    <string name="download_model">Download Model</string>
+    <string name="continue_crop_only">Crop-Only Mode</string>
+</resources>
