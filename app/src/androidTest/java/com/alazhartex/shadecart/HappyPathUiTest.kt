@@ -15,6 +15,7 @@ import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.rule.GrantPermissionRule
 import com.alazhartex.shadecart.data.local.AlAzharTexDatabase
@@ -82,6 +83,7 @@ class HappyPathUiTest {
             composeRule.onNodeWithTag("ocr_fabric_code_input").performScrollTo().performTextReplacement("SLK-180")
             composeRule.onNodeWithTag("ocr_weight_input").performScrollTo().performTextReplacement("180")
             composeRule.onNodeWithTag("ocr_width_input").performScrollTo().performTextReplacement("150")
+            Espresso.closeSoftKeyboard()
 
             // 3. Save Shade Cart -> navigates to Digital Shade Card tab
             composeRule.onNodeWithTag("save_shade_cart_button").performScrollTo().performClick()

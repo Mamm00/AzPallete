@@ -300,7 +300,7 @@ fun AlAzharTexShadeCartApp(
                         onSavedNavigateToCart = { savedCartId ->
                             navController.navigate(NavRoutes.digitalShadeCard(savedCartId)) {
                                 popUpTo(navController.graph.findStartDestination().id) {
-                                    inclusive = false
+                                    inclusive = true
                                 }
                                 launchSingleTop = true
                             }
@@ -322,7 +322,7 @@ fun AlAzharTexShadeCartApp(
                         onSavedNavigateToCart = { savedCartId ->
                             navController.navigate(NavRoutes.digitalShadeCard(savedCartId)) {
                                 popUpTo(navController.graph.findStartDestination().id) {
-                                    inclusive = false
+                                    inclusive = true
                                 }
                                 launchSingleTop = true
                             }

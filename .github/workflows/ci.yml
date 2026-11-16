@@ -90,6 +90,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
 
       - name: Run Instrumented Tests on Android 15 (API 35) Emulator
+        id: android_tests
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -99,7 +100,28 @@ jobs:
           emulator-boot-timeout: 1200
           emulator-options: -no-window -no-snapshot -gpu swiftshader_indirect -noaudio
           disable-animations: true
-          script: ./gradlew connectedDebugAndroidTest --no-daemon --stacktrace
+          script: ./gradlew connectedDebugAndroidTest --no-daemon --stacktrace 2>&1 | tee android-gradle.log
+
+      - name: Annotate Android Test Failures
+        if: failure()
+        run: |
+          chmod +x tools/ci_gradle_annotate.sh
+          ./tools/ci_gradle_annotate.sh android-gradle.log || true
+          python3 - << 'PYEOF'
+          import pathlib, xml.etree.ElementTree as ET
+          for xml_path in sorted(pathlib.Path("app/build/outputs/androidTest-results").rglob("*.xml")):
+              try:
+                  root = ET.parse(xml_path).getroot()
+                  for tc in root.findall("testcase"):
+                      fail = tc.find("failure")
+                      if fail is not None:
+                          cls = tc.attrib.get("classname", "")
+                          name = tc.attrib.get("name", "")
+                          text = (fail.text or fail.attrib.get("message", "")).strip().replace("\n", " | ")[:900]
+                          print(f"::error::AndroidTest FAILED: {cls}.{name} -> {text}")
+              except Exception as e:
+                  print(f"::warning::Failed parsing {xml_path}: {e}")
+          PYEOF
 
       - name: Upload Android test reports
         if: always()
@@ -107,5 +129,6 @@ jobs:
         with:
           name: android-test-reports
           path: |
+            android-gradle.log
             app/build/reports/androidTests/
             app/build/outputs/androidTest-results/

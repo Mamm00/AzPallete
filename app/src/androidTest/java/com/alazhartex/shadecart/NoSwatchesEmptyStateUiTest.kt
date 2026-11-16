@@ -9,8 +9,10 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTextReplacement
 import androidx.test.core.app.ActivityScenario
+import androidx.test.espresso.Espresso
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import com.alazhartex.shadecart.data.local.AlAzharTexDatabase
 import com.alazhartex.shadecart.data.local.DatabaseSeeder
@@ -63,13 +65,15 @@ class NoSwatchesEmptyStateUiTest {
             composeRule.waitUntilAtLeastOneExists(hasTestTag("palette_editor_screen"), timeoutMillis = 10_000)
 
             // 3. Invalid HEX input disables Apply button & shows inline error
-            composeRule.onNodeWithTag("hex_input").performTextReplacement("#GGGGGG")
+            composeRule.onNodeWithTag("hex_input").performScrollTo().performTextReplacement("#GGGGGG")
+            Espresso.closeSoftKeyboard()
             composeRule.onNodeWithTag("hex_error_text").assertIsDisplayed()
-            composeRule.onNodeWithTag("apply_hex_button").assertIsNotEnabled()
+            composeRule.onNodeWithTag("apply_hex_button").performScrollTo().assertIsNotEnabled()
 
             // 4. Valid HEX re-enables Apply button; apply & save back to Shade Cart
-            composeRule.onNodeWithTag("hex_input").performTextReplacement("#102A71")
-            composeRule.onNodeWithTag("apply_hex_button").assertIsEnabled()
+            composeRule.onNodeWithTag("hex_input").performScrollTo().performTextReplacement("#102A71")
+            Espresso.closeSoftKeyboard()
+            composeRule.onNodeWithTag("apply_hex_button").performScrollTo().assertIsEnabled()
             composeRule.onNodeWithTag("apply_hex_button").performClick()
 
             composeRule.onNodeWithTag("save_palette_button").performClick()
