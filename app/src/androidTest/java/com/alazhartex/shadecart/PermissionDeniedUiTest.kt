@@ -67,7 +67,7 @@ class PermissionDeniedUiTest {
 
         // First denial: rationale & Allow Camera CTA visible
         composeRule.onNodeWithTag("camera_permission_rationale_card").assertIsDisplayed()
-        composeRule.onNodeWithText("Camera Permission Needed").assertIsDisplayed()
+        composeRule.onNodeWithText("Camera Access Needed").assertIsDisplayed()
         composeRule.onNodeWithTag("allow_camera_button").assertIsDisplayed()
 
         // Permanent denial: "Open Settings" deep link visible and launches Settings intent
