@@ -39,7 +39,9 @@ class ShadeCartRepositoryConflictTest {
         repository = ShadeCartRepository(
             store = store,
             syncAdapter = syncAdapter,
-            syncScheduler = SyncWorkScheduler { /* no-op for unit tests */ },
+            syncScheduler = object : SyncWorkScheduler {
+                override fun enqueueSync() = Unit
+            },
             json = json,
             ioDispatcher = Dispatchers.Unconfined,
         )
@@ -55,6 +57,8 @@ class ShadeCartRepositoryConflictTest {
                 widthCm = 150,
                 swatches = listOf(
                     SwatchDraft(
+                        id = "sw-1",
+                        fabricTypeId = "fab-1",
                         swatchNumber = "5",
                         colorHex = "#102A71",
                         colorName = "Azhar Navy",
@@ -70,6 +74,8 @@ class ShadeCartRepositoryConflictTest {
             expectedCartVersion = 1L,
             swatches = listOf(
                 SwatchDraft(
+                    id = "sw-1",
+                    fabricTypeId = "fab-1",
                     swatchNumber = "5",
                     colorHex = "#0F5132",
                     colorName = "Emerald",
@@ -86,6 +92,8 @@ class ShadeCartRepositoryConflictTest {
             expectedCartVersion = 1L,
             swatches = listOf(
                 SwatchDraft(
+                    id = "sw-1",
+                    fabricTypeId = "fab-1",
                     swatchNumber = "5",
                     colorHex = "#CD1820",
                     colorName = "Crimson",
@@ -103,7 +111,7 @@ class ShadeCartRepositoryConflictTest {
 
         // Keep Local wins and increments version to 3
         val resolved = repository.resolveConflict(created.cartId, ConflictResolution.KEEP_LOCAL)
-        assertTrue(resolved)
+        assertTrue(resolved is SaveResult.Success)
         assertTrue(repository.observeConflicts().first().isEmpty())
 
         val persisted = repository.observeCart(created.cartId).first()!!
@@ -122,6 +130,8 @@ class ShadeCartRepositoryConflictTest {
                 widthCm = 150,
                 swatches = listOf(
                     SwatchDraft(
+                        id = "sw-7",
+                        fabricTypeId = "fab-1",
                         swatchNumber = "7",
                         colorHex = "#D4A017",
                         colorName = "Sand Gold",
@@ -137,6 +147,8 @@ class ShadeCartRepositoryConflictTest {
             expectedCartVersion = 1L,
             swatches = listOf(
                 SwatchDraft(
+                    id = "sw-7",
+                    fabricTypeId = "fab-1",
                     swatchNumber = "7",
                     colorHex = "#102A71",
                     colorName = "Navy",
@@ -151,6 +163,8 @@ class ShadeCartRepositoryConflictTest {
             expectedCartVersion = 1L,
             swatches = listOf(
                 SwatchDraft(
+                    id = "sw-7",
+                    fabricTypeId = "fab-1",
                     swatchNumber = "99",
                     colorHex = "#CD1820",
                     colorName = "Crimson",
@@ -160,7 +174,7 @@ class ShadeCartRepositoryConflictTest {
         )
 
         val resolved = repository.resolveConflict(created.cartId, ConflictResolution.KEEP_REMOTE)
-        assertTrue(resolved)
+        assertTrue(resolved is SaveResult.Success)
         assertTrue(repository.observeConflicts().first().isEmpty())
 
         val persisted = repository.observeCart(created.cartId).first()!!
@@ -178,6 +192,8 @@ class ShadeCartRepositoryConflictTest {
                 widthCm = 150,
                 swatches = listOf(
                     SwatchDraft(
+                        id = "sw-12",
+                        fabricTypeId = "fab-ctn",
                         swatchNumber = "12",
                         colorHex = "#761D3A",
                         colorName = "Burgundy",
@@ -189,8 +205,8 @@ class ShadeCartRepositoryConflictTest {
 
         syncAdapter.armSimulatedConflict()
         val outcome = repository.syncPendingQueue()
-        assertEquals(0, outcome.syncedCount)
-        assertEquals(1, outcome.conflictCount)
+        assertEquals(0, outcome.synced)
+        assertEquals(1, outcome.conflicts)
 
         val conflicts = repository.observeConflicts().first()
         assertEquals(1, conflicts.size)
@@ -198,10 +214,10 @@ class ShadeCartRepositoryConflictTest {
         assertTrue(conflicts.first().remoteSnapshot.version > conflicts.first().localSnapshot.version)
 
         // Keeping local bumps version past remote so subsequent sync succeeds
-        assertTrue(repository.resolveConflict(created.cartId, ConflictResolution.KEEP_LOCAL))
+        assertTrue(repository.resolveConflict(created.cartId, ConflictResolution.KEEP_LOCAL) is SaveResult.Success)
         val followUp = repository.syncPendingQueue()
-        assertEquals(1, followUp.syncedCount)
-        assertEquals(0, followUp.conflictCount)
+        assertEquals(1, followUp.synced)
+        assertEquals(0, followUp.conflicts)
     }
 
     @Test
@@ -214,6 +230,8 @@ class ShadeCartRepositoryConflictTest {
                 widthCm = 145,
                 swatches = listOf(
                     SwatchDraft(
+                        id = "sw-lin-1",
+                        fabricTypeId = "fab-lin",
                         swatchNumber = "1",
                         colorHex = "#112233",
                         colorName = "Slate",
@@ -233,6 +251,8 @@ class ShadeCartRepositoryConflictTest {
                         expectedCartVersion = 1L,
                         swatches = listOf(
                             SwatchDraft(
+                                id = "sw-lin-1",
+                                fabricTypeId = "fab-lin",
                                 swatchNumber = "1",
                                 colorHex = "#AA1122",
                                 colorName = "Writer A",
@@ -247,6 +267,8 @@ class ShadeCartRepositoryConflictTest {
                         expectedCartVersion = 1L,
                         swatches = listOf(
                             SwatchDraft(
+                                id = "sw-lin-1",
+                                fabricTypeId = "fab-lin",
                                 swatchNumber = "1",
                                 colorHex = "#22AA11",
                                 colorName = "Writer B",
