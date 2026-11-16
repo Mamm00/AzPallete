@@ -38,7 +38,8 @@ class MlKitTextRecognitionGateway @Inject constructor(
             val w = bitmap.width.coerceAtLeast(1).toFloat()
             val h = bitmap.height.coerceAtLeast(1).toFloat()
             val input = InputImage.fromBitmap(bitmap, 0)
-            val result = recognizer.process(input).await()
+            val result = runCatching { recognizer.process(input).await() }.getOrNull()
+                ?: return@withContext parser.parse(emptyList())
 
             val blocks = mutableListOf<OcrTextBlock>()
             for (block in result.textBlocks) {
