@@ -24,13 +24,35 @@ android {
         }
     }
 
+    signingConfigs {
+        // Optional release signing via ALAZHARTEX_KEYSTORE_* CI secrets; falls back to debug signing when unset.
+        create("release") {
+            val ksPath = System.getenv("ALAZHARTEX_KEYSTORE_PATH")
+            if (!ksPath.isNullOrBlank()) {
+                storeType = System.getenv("ALAZHARTEX_KEYSTORE_TYPE") ?: "PKCS12"
+                storeFile = file(ksPath)
+                storePassword = System.getenv("ALAZHARTEX_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("ALAZHARTEX_KEY_ALIAS")
+                keyPassword = System.getenv("ALAZHARTEX_KEY_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            signingConfig = if (!System.getenv("ALAZHARTEX_KEYSTORE_PATH").isNullOrBlank()) {
+                signingConfigs.getByName("release")
+            } else {
+                signingConfigs.getByName("debug")
+            }
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro",
             )
+        }
+        debug {
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
