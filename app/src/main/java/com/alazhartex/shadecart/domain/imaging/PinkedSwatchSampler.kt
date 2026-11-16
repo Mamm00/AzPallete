@@ -2,7 +2,6 @@ package com.alazhartex.shadecart.domain.imaging
 
 import android.graphics.Bitmap
 import android.graphics.Color
-import androidx.annotation.WorkerThread
 import androidx.palette.graphics.Palette
 import com.alazhartex.shadecart.data.model.NormalizedRect
 import kotlinx.coroutines.CoroutineDispatcher
@@ -127,7 +126,6 @@ class PinkedSwatchSampler(
         val innerSampleBounds: NormalizedRect,
     )
 
-    @WorkerThread
     suspend fun extractInnerDominantColor(
         sourceBitmap: Bitmap,
         swatchBounds: NormalizedRect,

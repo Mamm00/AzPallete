@@ -1,6 +1,7 @@
 package com.alazhartex.shadecart.data.local
 
-import androidx.annotation.WorkerThread
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -13,8 +14,7 @@ class DatabaseSeeder @Inject constructor(
     private val fabricTypeDao: FabricTypeDao,
     private val rollDao: RollDao,
 ) {
-    @WorkerThread
-    suspend fun ensureSeeded() {
+    suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
         if (fabricTypeDao.count() == 0) {
             fabricTypeDao.upsertAll(defaultFabricTypes(now))

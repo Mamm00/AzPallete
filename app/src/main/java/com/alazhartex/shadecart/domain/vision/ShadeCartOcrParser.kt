@@ -35,7 +35,7 @@ class ShadeCartOcrParser {
             """(?i)(?:fabric\s*name|fabric|quality)\s*[:\-]\s*([^\r\n]+?)(?=\s+(?:code|ref|weight|width)\s*[:\-]|$)""",
         )
         private val FABRIC_CODE_REGEX = Regex(
-            """(?i)(?:code|ref|sku|art(?:icle)?)\s*[:\-]\s*([A-Z0-9][A-Z0-9\-_/]{1,20})""",
+            """(?i)(?:code|ref|sku|art(?:icle)?(?:\s*no)?)\s*[:.\-]\s*([A-Z0-9][A-Z0-9\-_/]{1,20})""",
         )
         private val WEIGHT_GSM_REGEX = Regex(
             """(?i)(?:weight\s*[:\-]\s*)?(\d{2,4})\s*(?:gsm|g/m2|g/m²|gr/m2|gm2)\b""",

@@ -1,7 +1,6 @@
 package com.alazhartex.shadecart.domain.imaging
 
 import android.graphics.Bitmap
-import androidx.annotation.WorkerThread
 import com.alazhartex.shadecart.data.model.NormalizedRect
 import com.alazhartex.shadecart.domain.vision.OcrTextBlock
 import kotlinx.coroutines.CoroutineDispatcher
@@ -98,7 +97,6 @@ class TwoColumnSwatchDetector(
         }
     }
 
-    @WorkerThread
     suspend fun detectSwatches(
         bitmap: Bitmap,
         numericLabels: List<OcrTextBlock>,

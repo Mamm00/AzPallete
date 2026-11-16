@@ -1,6 +1,5 @@
 package com.alazhartex.shadecart.data.repo
 
-import androidx.annotation.WorkerThread
 import com.alazhartex.shadecart.data.local.FabricType
 import com.alazhartex.shadecart.data.local.Roll
 import com.alazhartex.shadecart.data.local.ShadeCartEntity
@@ -80,7 +79,6 @@ class ShadeCartRepository(
             rows.mapNotNull { row -> decodeConflictRow(row) }
         }
 
-    @WorkerThread
     suspend fun createOrGetDraftCart(draft: ShadeCartDraft): SaveResult = withContext(ioDispatcher) {
         writeMutex.withLock {
             store.runInTransaction {
@@ -154,7 +152,6 @@ class ShadeCartRepository(
      * If another writer updated the entity first, rejects the stale write, persists a conflict
      * record so the UI banner survives navigation/recreation, and returns [SaveResult.Conflict].
      */
-    @WorkerThread
     suspend fun saveCartWithOptimisticLock(
         cartId: String,
         expectedVersion: Long,
@@ -280,7 +277,6 @@ class ShadeCartRepository(
         result
     }
 
-    @WorkerThread
     suspend fun updateSwatchesWithOptimisticLock(
         cartId: String,
         expectedCartVersion: Long,
@@ -307,7 +303,6 @@ class ShadeCartRepository(
      * Drains pending items from `sync_queue` using [ShadeCartSyncAdapter].
      * Any remote version mismatch records a non-blocking [SyncConflict] without overwriting local edits.
      */
-    @WorkerThread
     suspend fun syncPendingQueue(): SyncBatchReport = withContext(ioDispatcher) {
         val pending = store.getPendingSyncItems()
         var syncedCount = 0
@@ -401,7 +396,6 @@ class ShadeCartRepository(
         )
     }
 
-    @WorkerThread
     suspend fun resolveConflict(
         cartId: String,
         resolution: ConflictResolution,
@@ -511,7 +505,6 @@ class ShadeCartRepository(
         result
     }
 
-    @WorkerThread
     suspend fun deleteCart(cartId: String) = withContext(ioDispatcher) {
         writeMutex.withLock {
             store.runInTransaction {

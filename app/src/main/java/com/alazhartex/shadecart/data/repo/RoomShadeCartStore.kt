@@ -1,6 +1,5 @@
 package com.alazhartex.shadecart.data.repo
 
-import androidx.annotation.WorkerThread
 import androidx.room.withTransaction
 import com.alazhartex.shadecart.data.local.AlAzharTexDatabase
 import com.alazhartex.shadecart.data.local.FabricType
@@ -46,28 +45,22 @@ class RoomShadeCartStore @Inject constructor(
     override fun observeConflicts(): Flow<List<SyncQueueEntity>> =
         syncQueueDao.observeByStatus(SyncStatus.CONFLICT)
 
-    @WorkerThread
     override suspend fun <T> runInTransaction(block: suspend () -> T): T =
         database.withTransaction { block() }
 
-    @WorkerThread
     override suspend fun getCart(cartId: String): ShadeCartEntity? =
         cartDao.getById(cartId)
 
-    @WorkerThread
     override suspend fun getCartWithDetails(cartId: String): ShadeCartWithDetails? =
         cartDao.getByIdWithDetails(cartId)
 
-    @WorkerThread
     override suspend fun getSwatchesForCart(cartId: String): List<SwatchEntity> =
         swatchDao.getForCart(cartId)
 
-    @WorkerThread
     override suspend fun upsertCart(cart: ShadeCartEntity) {
         cartDao.upsert(cart)
     }
 
-    @WorkerThread
     override suspend fun replaceSwatches(cartId: String, swatches: List<SwatchEntity>) {
         swatchDao.deleteForCart(cartId)
         if (swatches.isNotEmpty()) {
@@ -75,56 +68,44 @@ class RoomShadeCartStore @Inject constructor(
         }
     }
 
-    @WorkerThread
     override suspend fun deleteCart(cartId: String) {
         cartDao.deleteById(cartId)
     }
 
-    @WorkerThread
     override suspend fun findFabricTypeById(id: String): FabricType? =
         fabricTypeDao.getById(id)
 
-    @WorkerThread
     override suspend fun findFabricTypeByCode(code: String): FabricType? =
         fabricTypeDao.findByCode(code)
 
-    @WorkerThread
     override suspend fun getAllFabricTypes(): List<FabricType> =
         fabricTypeDao.getAll()
 
-    @WorkerThread
     override suspend fun upsertFabricType(fabricType: FabricType) {
         fabricTypeDao.upsert(fabricType)
     }
 
-    @WorkerThread
     override suspend fun getRollsForFabric(fabricTypeId: String): List<Roll> =
         rollDao.getForFabric(fabricTypeId)
 
-    @WorkerThread
     override suspend fun upsertRolls(rolls: List<Roll>) {
         rollDao.upsertAll(rolls)
     }
 
-    @WorkerThread
     override suspend fun getPendingSyncItems(): List<SyncQueueEntity> =
         syncQueueDao.getPendingItems()
 
-    @WorkerThread
     override suspend fun getConflictForEntity(entityId: String): SyncQueueEntity? =
         syncQueueDao.getConflictForEntity(entityId)
 
-    @WorkerThread
     override suspend fun upsertSyncQueueItem(item: SyncQueueEntity) {
         syncQueueDao.upsert(item)
     }
 
-    @WorkerThread
     override suspend fun deletePendingSyncItems(entityId: String) {
         syncQueueDao.deletePendingForEntity(entityId)
     }
 
-    @WorkerThread
     override suspend fun deleteConflictSyncItems(entityId: String) {
         syncQueueDao.deleteConflictsForEntity(entityId)
     }

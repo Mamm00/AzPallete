@@ -61,7 +61,6 @@ class BitmapProcessor(
      * Imports a user-selected photo URI into app-private storage, applies EXIF orientation,
      * and downsamples so its long edge never exceeds [MAX_LONG_EDGE_PX] (2048 px).
      */
-    @WorkerThread
     suspend fun importUriToBoundedOriginal(uri: Uri): String = withContext(ioDispatcher) {
         val tempRaw = File(context.cacheDir, "raw_${UUID.randomUUID()}.tmp")
         try {
@@ -87,7 +86,6 @@ class BitmapProcessor(
      * Normalizes an already captured CameraX temp file in-place (or to a permanent original copy)
      * capped at [MAX_LONG_EDGE_PX] (2048 px).
      */
-    @WorkerThread
     suspend fun finalizeCapturedTempFile(tempPath: String): String = withContext(ioDispatcher) {
         val dest = File(capturesDir(), "orig_${UUID.randomUUID()}.jpg")
         downsampleAndSaveJpeg(
@@ -105,7 +103,6 @@ class BitmapProcessor(
      * Copies a bundled asset (such as `sample_shade_cart.png`) into app-private capture storage,
      * downsampling if needed to <= 2048 px.
      */
-    @WorkerThread
     suspend fun importAssetToBoundedOriginal(assetName: String): String = withContext(ioDispatcher) {
         val tempRaw = File(context.cacheDir, "asset_${UUID.randomUUID()}.tmp")
         try {
@@ -126,7 +123,6 @@ class BitmapProcessor(
         }
     }
 
-    @WorkerThread
     suspend fun loadRgb565Preview(
         path: String,
         maxLongEdge: Int = PREVIEW_MAX_EDGE_PX,
@@ -139,7 +135,6 @@ class BitmapProcessor(
         )
     }
 
-    @WorkerThread
     suspend fun loadProcessingBitmap(
         path: String,
         maxLongEdge: Int = MAX_LONG_EDGE_PX,
@@ -156,7 +151,6 @@ class BitmapProcessor(
      * Renders non-destructive [editStack] transforms from [originalPath] into [destFile].
      * Never modifies or overwrites [originalPath].
      */
-    @WorkerThread
     suspend fun renderNonDestructiveEdit(
         originalPath: String,
         editStack: EditStack,

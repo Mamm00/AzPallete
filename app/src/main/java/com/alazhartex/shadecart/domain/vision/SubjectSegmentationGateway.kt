@@ -3,7 +3,6 @@ package com.alazhartex.shadecart.domain.vision
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
-import androidx.annotation.WorkerThread
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
@@ -43,7 +42,6 @@ interface SubjectSegmentationGateway {
     suspend fun checkModelAvailability(): SegmentationModelState
     fun downloadModel(): Flow<SegmentationModelState>
 
-    @WorkerThread
     suspend fun segmentForegroundToMask(
         bitmap: Bitmap,
         maskOutFile: File,
@@ -150,7 +148,6 @@ class MlKitSubjectSegmentationGateway(
         }
     }
 
-    @WorkerThread
     override suspend fun segmentForegroundToMask(
         bitmap: Bitmap,
         maskOutFile: File,

@@ -1,7 +1,6 @@
 package com.alazhartex.shadecart.domain.vision
 
 import android.graphics.Bitmap
-import androidx.annotation.WorkerThread
 import com.alazhartex.shadecart.data.model.NormalizedRect
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
@@ -12,7 +11,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 
 interface TextRecognitionGateway {
-    @WorkerThread
     suspend fun recognizeShadeCart(bitmap: Bitmap): ShadeCartOcrResult
 }
 
@@ -29,7 +27,6 @@ class MlKitTextRecognitionGateway(
         TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
     }
 
-    @WorkerThread
     override suspend fun recognizeShadeCart(bitmap: Bitmap): ShadeCartOcrResult =
         withContext(ioDispatcher) {
             val w = bitmap.width.coerceAtLeast(1).toFloat()
