@@ -41,6 +41,17 @@ jobs:
         if: always()
         run: ./tools/ci_gradle_annotate.sh gradle.log
 
+      - name: Show Gradle failure tail
+        if: steps.gradle_build.outcome != 'success'
+        run: |
+          tail -n 150 gradle.log
+          {
+            echo "### Gradle Failure Tail"
+            echo '```'
+            tail -n 120 gradle.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload test, lint & build artifacts
         if: always()
         uses: actions/upload-artifact@v4
