@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.annotation.WorkerThread
+import com.alazhartex.shadecart.di.IoDispatcher
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
@@ -64,7 +65,7 @@ interface SubjectSegmentationGateway {
 @Singleton
 class MlKitSubjectSegmentationGateway @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SubjectSegmentationGateway {
 
     private val segmenter: SubjectSegmenter by lazy {

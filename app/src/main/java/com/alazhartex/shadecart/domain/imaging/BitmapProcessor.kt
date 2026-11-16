@@ -14,6 +14,7 @@ import androidx.annotation.WorkerThread
 import androidx.exifinterface.media.ExifInterface
 import com.alazhartex.shadecart.data.model.EditStack
 import com.alazhartex.shadecart.data.model.NormalizedRect
+import com.alazhartex.shadecart.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -38,7 +39,7 @@ import kotlin.math.roundToInt
 @Singleton
 class BitmapProcessor @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
         const val MAX_LONG_EDGE_PX = 2048
