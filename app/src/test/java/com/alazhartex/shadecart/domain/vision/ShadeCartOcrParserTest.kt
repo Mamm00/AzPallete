@@ -40,7 +40,7 @@ class ShadeCartOcrParserTest {
             ),
         )
 
-        val result = ShadeCartOcrParser.parse(headerBlocks)
+        val result = ShadeCartOcrParser().parse(headerBlocks)
         assertEquals("Silk 180", result.header.fabricName)
         assertEquals("SLK-180", result.header.fabricCode)
         assertEquals(180, result.header.weightGsm)
@@ -69,7 +69,7 @@ class ShadeCartOcrParserTest {
             ),
         )
 
-        val result = ShadeCartOcrParser.parse(blocks)
+        val result = ShadeCartOcrParser().parse(blocks)
         assertEquals("Cotton Poplin 130", result.header.fabricName)
         assertEquals("CTN-130", result.header.fabricCode)
         assertEquals(130, result.header.weightGsm)

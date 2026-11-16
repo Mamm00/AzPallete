@@ -3,7 +3,6 @@ package com.alazhartex.shadecart.domain.vision
 import android.graphics.Bitmap
 import androidx.annotation.WorkerThread
 import com.alazhartex.shadecart.data.model.NormalizedRect
-import com.alazhartex.shadecart.di.IoDispatcher
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.text.TextRecognition
 import com.google.mlkit.vision.text.latin.TextRecognizerOptions
@@ -11,8 +10,6 @@ import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
-import javax.inject.Inject
-import javax.inject.Singleton
 
 interface TextRecognitionGateway {
     @WorkerThread
@@ -23,10 +20,9 @@ interface TextRecognitionGateway {
  * On-device OCR via Google ML Kit Text Recognition (`com.google.mlkit:text-recognition`).
  * See README.md for the Google-hosted closed-source model disclosure.
  */
-@Singleton
-class MlKitTextRecognitionGateway @Inject constructor(
+class MlKitTextRecognitionGateway(
     private val parser: ShadeCartOcrParser = ShadeCartOcrParser(),
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : TextRecognitionGateway {
 
     private val recognizer by lazy {

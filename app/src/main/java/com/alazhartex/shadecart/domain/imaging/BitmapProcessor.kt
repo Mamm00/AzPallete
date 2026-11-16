@@ -14,7 +14,6 @@ import androidx.annotation.WorkerThread
 import androidx.exifinterface.media.ExifInterface
 import com.alazhartex.shadecart.data.model.EditStack
 import com.alazhartex.shadecart.data.model.NormalizedRect
-import com.alazhartex.shadecart.di.IoDispatcher
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -22,8 +21,6 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlin.math.max
 import kotlin.math.roundToInt
 
@@ -36,10 +33,9 @@ import kotlin.math.roundToInt
  * - Prompt recycling of intermediate bitmaps.
  * - Strict off-main-thread execution (`@WorkerThread` + [ioDispatcher]).
  */
-@Singleton
-class BitmapProcessor @Inject constructor(
-    @ApplicationContext private val context: Context,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+class BitmapProcessor(
+    private val context: Context,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) {
     companion object {
         const val MAX_LONG_EDGE_PX = 2048

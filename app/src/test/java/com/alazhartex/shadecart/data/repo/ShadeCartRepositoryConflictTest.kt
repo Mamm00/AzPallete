@@ -9,6 +9,7 @@ import com.alazhartex.shadecart.data.local.SwatchWithRoll
 import com.alazhartex.shadecart.data.local.SyncQueueEntity
 import com.alazhartex.shadecart.data.local.SyncStatus
 import com.alazhartex.shadecart.data.sync.StubShadeCartSyncAdapter
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
@@ -34,11 +35,13 @@ class ShadeCartRepositoryConflictTest {
     @Before
     fun setUp() {
         store = InMemoryShadeCartStore()
-        syncAdapter = StubShadeCartSyncAdapter(json)
+        syncAdapter = StubShadeCartSyncAdapter()
         repository = ShadeCartRepository(
             store = store,
             syncAdapter = syncAdapter,
+            syncScheduler = SyncWorkScheduler { /* no-op for unit tests */ },
             json = json,
+            ioDispatcher = Dispatchers.Unconfined,
         )
     }
 
@@ -267,27 +270,39 @@ private class InMemoryShadeCartStore : ShadeCartStore {
 
     var simulatedIoDelayMillis: Long = 0L
 
-    private val fabrics = MutableStateFlow<List<FabricType>>(emptyList())
-    private val rolls = MutableStateFlow<List<Roll>>(emptyList())
+    private val fabrics = linkedMapOf<String, FabricType>()
+    private val rolls = linkedMapOf<String, Roll>()
     private val carts = linkedMapOf<String, ShadeCartEntity>()
     private val swatchesByCart = linkedMapOf<String, MutableList<SwatchEntity>>()
     private val queue = linkedMapOf<String, SyncQueueEntity>()
     private val versionTick = MutableStateFlow(0L)
 
-    override fun observeFabricTypes(): Flow<List<FabricType>> = fabrics
-
-    override fun observeRolls(): Flow<List<Roll>> = rolls
-
-    override fun observeCarts(): Flow<List<ShadeCartWithDetails>> = versionTick.map {
+    override fun observeCartsWithDetails(): Flow<List<ShadeCartWithDetails>> = versionTick.map {
         carts.values.sortedByDescending { it.updatedAt }.mapNotNull { cart -> buildDetails(cart.id) }
     }
 
-    override fun observeCart(cartId: String): Flow<ShadeCartWithDetails?> = versionTick.map {
+    override fun observeCartWithDetails(cartId: String): Flow<ShadeCartWithDetails?> = versionTick.map {
         buildDetails(cartId)
+    }
+
+    override fun observeFabricTypes(): Flow<List<FabricType>> = versionTick.map {
+        fabrics.values.sortedBy { it.name }
+    }
+
+    override fun observeRolls(): Flow<List<Roll>> = versionTick.map {
+        rolls.values.sortedBy { it.rollCode }
+    }
+
+    override fun observeRollsForFabric(fabricTypeId: String): Flow<List<Roll>> = versionTick.map {
+        rolls.values.filter { it.fabricTypeId == fabricTypeId }.sortedBy { it.rollCode }
     }
 
     override fun observeSyncQueue(): Flow<List<SyncQueueEntity>> = versionTick.map {
         queue.values.sortedByDescending { it.createdAt }
+    }
+
+    override fun observeConflicts(): Flow<List<SyncQueueEntity>> = versionTick.map {
+        queue.values.filter { it.status == SyncStatus.CONFLICT }.sortedByDescending { it.createdAt }
     }
 
     override suspend fun <T> runInTransaction(block: suspend () -> T): T {
@@ -295,64 +310,77 @@ private class InMemoryShadeCartStore : ShadeCartStore {
         return block()
     }
 
-    override suspend fun getCartById(cartId: String): ShadeCartEntity? = carts[cartId]
+    override suspend fun getCart(cartId: String): ShadeCartEntity? = carts[cartId]
 
     override suspend fun getCartWithDetails(cartId: String): ShadeCartWithDetails? = buildDetails(cartId)
+
+    override suspend fun getSwatchesForCart(cartId: String): List<SwatchEntity> =
+        swatchesByCart[cartId].orEmpty().sortedBy { it.positionOrder }
 
     override suspend fun upsertCart(cart: ShadeCartEntity) {
         carts[cart.id] = cart
         versionTick.value++
     }
 
-    override suspend fun updateCartStatus(cartId: String, syncStatus: SyncStatus, updatedAt: Long) {
-        carts[cartId]?.let {
-            carts[cartId] = it.copy(syncStatus = syncStatus, updatedAt = updatedAt)
-            versionTick.value++
-        }
-    }
-
-    override suspend fun getSwatchesForCart(cartId: String): List<SwatchEntity> =
-        swatchesByCart[cartId].orEmpty().sortedBy { it.positionOrder }
-
-    override suspend fun replaceSwatchesForCart(cartId: String, swatches: List<SwatchEntity>) {
+    override suspend fun replaceSwatches(cartId: String, swatches: List<SwatchEntity>) {
         swatchesByCart[cartId] = swatches.toMutableList()
         versionTick.value++
     }
 
-    override suspend fun enqueueSyncItem(item: SyncQueueEntity) {
-        queue[item.id] = item
+    override suspend fun deleteCart(cartId: String) {
+        carts.remove(cartId)
+        swatchesByCart.remove(cartId)
+        versionTick.value++
+    }
+
+    override suspend fun findFabricTypeById(id: String): FabricType? = fabrics[id]
+
+    override suspend fun findFabricTypeByCode(code: String): FabricType? =
+        fabrics.values.firstOrNull { it.code.equals(code, ignoreCase = true) }
+
+    override suspend fun getAllFabricTypes(): List<FabricType> = fabrics.values.sortedBy { it.name }
+
+    override suspend fun upsertFabricType(fabricType: FabricType) {
+        fabrics[fabricType.id] = fabricType
+        versionTick.value++
+    }
+
+    override suspend fun getRollsForFabric(fabricTypeId: String): List<Roll> =
+        rolls.values.filter { it.fabricTypeId == fabricTypeId }
+
+    override suspend fun upsertRolls(rolls: List<Roll>) {
+        rolls.forEach { this.rolls[it.id] = it }
         versionTick.value++
     }
 
     override suspend fun getPendingSyncItems(): List<SyncQueueEntity> =
         queue.values.filter { it.status == SyncStatus.PENDING }.sortedBy { it.createdAt }
 
-    override suspend fun getQueueItemsForCart(cartId: String): List<SyncQueueEntity> =
-        queue.values.filter { it.cartId == cartId }.sortedByDescending { it.createdAt }
+    override suspend fun getConflictForEntity(entityId: String): SyncQueueEntity? =
+        queue.values.firstOrNull { it.entityId == entityId && it.status == SyncStatus.CONFLICT }
 
-    override suspend fun updateQueueItem(item: SyncQueueEntity) {
+    override suspend fun upsertSyncQueueItem(item: SyncQueueEntity) {
         queue[item.id] = item
         versionTick.value++
     }
 
-    override suspend fun resolvePendingQueueForCart(cartId: String, resolvedAt: Long) {
-        queue.entries.forEach { (id, item) ->
-            if (item.cartId == cartId && (item.status == SyncStatus.CONFLICT || item.status == SyncStatus.PENDING)) {
-                queue[id] = item.copy(
-                    status = SyncStatus.SYNCED,
-                    lastAttemptAt = resolvedAt,
-                    conflictRemoteJson = null,
-                    conflictMessage = null,
-                )
-            }
-        }
+    override suspend fun deletePendingSyncItems(entityId: String) {
+        val ids = queue.values.filter { it.entityId == entityId && it.status == SyncStatus.PENDING }.map { it.id }
+        ids.forEach { queue.remove(it) }
+        versionTick.value++
+    }
+
+    override suspend fun deleteConflictSyncItems(entityId: String) {
+        val ids = queue.values.filter { it.entityId == entityId && it.status == SyncStatus.CONFLICT }.map { it.id }
+        ids.forEach { queue.remove(it) }
         versionTick.value++
     }
 
     private fun buildDetails(cartId: String): ShadeCartWithDetails? {
         val cart = carts[cartId] ?: return null
+        val fabric = cart.fabricTypeId?.let { fabrics[it] }
         val sw = swatchesByCart[cartId].orEmpty().sortedBy { it.positionOrder }
-            .map { SwatchWithRoll(swatch = it, roll = null) }
-        return ShadeCartWithDetails(cart = cart, fabricType = null, swatches = sw)
+            .map { s -> SwatchWithRoll(swatch = s, roll = s.rollId?.let { rolls[it] }) }
+        return ShadeCartWithDetails(cart = cart, fabricType = fabric, swatches = sw)
     }
 }

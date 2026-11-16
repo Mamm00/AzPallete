@@ -20,8 +20,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
-import javax.inject.Inject
-import javax.inject.Singleton
 
 interface SyncWorkScheduler {
     fun enqueueSync()
@@ -48,8 +46,7 @@ data class ShadeCartDraft(
  * Every mutation executes off the main thread on [ioDispatcher], serialized via [writeMutex]
  * AND wrapped inside [ShadeCartStore.runInTransaction] (`RoomDatabase.withTransaction`).
  */
-@Singleton
-class ShadeCartRepository @Inject constructor(
+class ShadeCartRepository(
     private val store: ShadeCartStore,
     private val syncAdapter: ShadeCartSyncAdapter,
     private val syncScheduler: SyncWorkScheduler,

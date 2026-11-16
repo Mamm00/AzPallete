@@ -4,7 +4,6 @@ import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.annotation.WorkerThread
-import com.alazhartex.shadecart.di.IoDispatcher
 import com.google.android.gms.common.moduleinstall.InstallStatusListener
 import com.google.android.gms.common.moduleinstall.ModuleInstall
 import com.google.android.gms.common.moduleinstall.ModuleInstallRequest
@@ -16,7 +15,6 @@ import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
@@ -26,8 +24,6 @@ import kotlinx.coroutines.tasks.await
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.FileOutputStream
-import javax.inject.Inject
-import javax.inject.Singleton
 
 sealed interface SegmentationModelState {
     data object Checking : SegmentationModelState
@@ -62,10 +58,9 @@ interface SubjectSegmentationGateway {
  * / [SegmentationOutcome.ModelNotDownloaded] so the editor gracefully falls back to crop-only mode
  * with a non-blocking prompt.
  */
-@Singleton
-class MlKitSubjectSegmentationGateway @Inject constructor(
-    @ApplicationContext private val context: Context,
-    @IoDispatcher private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
+class MlKitSubjectSegmentationGateway(
+    private val context: Context,
+    private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
 ) : SubjectSegmentationGateway {
 
     private val segmenter: SubjectSegmenter by lazy {
