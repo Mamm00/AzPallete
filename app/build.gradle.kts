@@ -15,8 +15,12 @@ android {
         applicationId = "com.alazhartex.shadecart"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.1.0"
+
+        val syncBaseUrl = (System.getenv("ALAZHARTEX_SYNC_BASE_URL") ?: "")
+            .replace("\"", "\\\"")
+        buildConfigField("String", "SYNC_BASE_URL", "\"$syncBaseUrl\"")
 
         testInstrumentationRunner = "com.alazhartex.shadecart.HiltTestRunner"
         vectorDrawables {
@@ -40,7 +44,9 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // Chapter 12.1: Enable R8 code shrinking and resource shrinking for production releases.
+            isMinifyEnabled = true
+            isShrinkResources = true
             signingConfig = if (!System.getenv("ALAZHARTEX_KEYSTORE_PATH").isNullOrBlank()) {
                 signingConfigs.getByName("release")
             } else {
@@ -138,6 +144,13 @@ dependencies {
     implementation(libs.androidx.exifinterface)
     implementation(libs.coil.compose)
 
+    // Networking: Retrofit + OkHttp + Gson (Chapters 8.1, 8.2, 10.2)
+    implementation(libs.retrofit)
+    implementation(libs.retrofit.converter.gson)
+    implementation(libs.okhttp)
+    implementation(libs.okhttp.logging)
+    implementation(libs.gson)
+
     // ML Kit Text Recognition & Subject Segmentation (see README for Google-hosted model disclosure)
     implementation(libs.mlkit.text.recognition)
     implementation(libs.mlkit.subject.segmentation)
@@ -157,6 +170,7 @@ dependencies {
     testImplementation(libs.truth)
     testImplementation(libs.kotlinx.coroutines.test)
     testImplementation(libs.androidx.room.testing)
+    testImplementation(libs.okhttp.mockwebserver)
 
     // Instrumented Compose UI & Room Tests
     androidTestImplementation(platform(libs.androidx.compose.bom))
