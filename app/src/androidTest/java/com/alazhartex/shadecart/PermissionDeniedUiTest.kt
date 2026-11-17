@@ -19,7 +19,7 @@ import androidx.test.espresso.intent.matcher.IntentMatchers.hasData
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import com.alazhartex.shadecart.ui.screens.capture.CameraPermissionStatus
-import com.alazhartex.shadecart.ui.screens.capture.CartCaptureScreen
+import com.alazhartex.shadecart.ui.screens.capture.CartCaptureRoute
 import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
@@ -57,7 +57,7 @@ class PermissionDeniedUiTest {
 
         composeRule.setContent {
             AlAzharTexTheme {
-                CartCaptureScreen(
+                CartCaptureRoute(
                     permissionStatusOverride = status,
                     onImageReadyForEdit = {},
                     viewModel = hiltViewModel(),

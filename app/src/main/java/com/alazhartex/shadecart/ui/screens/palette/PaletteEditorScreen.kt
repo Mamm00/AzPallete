@@ -1,5 +1,6 @@
 package com.alazhartex.shadecart.ui.screens.palette
 
+import android.content.res.Configuration
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -61,11 +62,15 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.ThemeSettings
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
+import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 
 private val PresetTextileColors = listOf(
     "Navy" to "#102A71",
@@ -77,14 +82,56 @@ private val PresetTextileColors = listOf(
     "Charcoal" to "#383E4A",
 )
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Stateful route composable collecting [PaletteEditorViewModel.uiState] via
+ * `collectAsStateWithLifecycle` and delegating rendering to stateless [PaletteEditorScreen]
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
+ */
 @Composable
-fun PaletteEditorScreen(
+fun PaletteEditorRoute(
     onSavedNavigateToCart: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: PaletteEditorViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    PaletteEditorScreen(
+        uiState = uiState,
+        onStartNewSwatch = viewModel::startNewSwatch,
+        onStartEditingSwatch = viewModel::startEditingSwatch,
+        onSwatchNumberChanged = viewModel::onSwatchNumberChanged,
+        onColorNameChanged = viewModel::onColorNameChanged,
+        onHexInputChanged = viewModel::onHexInputChanged,
+        onRollSelected = viewModel::onRollSelected,
+        onApplyColorEditor = { viewModel.applyColorEditor() },
+        onMoveSwatch = viewModel::moveSwatch,
+        onDeleteSwatch = viewModel::deleteSwatch,
+        onSavePalette = { viewModel.savePalette(onSavedNavigateToCart) },
+        modifier = modifier,
+    )
+}
+
+/**
+ * Pure stateless UI screen for manual HEX color editing, preset swatch selection, roll linking,
+ * drag/reorder gestures (with stable `LazyColumn` keys), and saving
+ * (Pyre, Chapter 1.2, 4.4, 11.1, & 11.4).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun PaletteEditorScreen(
+    uiState: PaletteEditorUiState,
+    onStartNewSwatch: () -> Unit,
+    onStartEditingSwatch: (SwatchInput) -> Unit,
+    onSwatchNumberChanged: (String) -> Unit,
+    onColorNameChanged: (String) -> Unit,
+    onHexInputChanged: (String) -> Unit,
+    onRollSelected: (String?) -> Unit,
+    onApplyColorEditor: () -> Unit,
+    onMoveSwatch: (Int, Int) -> Unit,
+    onDeleteSwatch: (String) -> Unit,
+    onSavePalette: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     var draggedIndex by remember { mutableIntStateOf(-1) }
     var dragAccumulatedY by remember { mutableFloatStateOf(0f) }
     val rowSwapThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
@@ -102,7 +149,7 @@ fun PaletteEditorScreen(
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            item {
+            item(key = "palette_editor_form") {
                 Card(
                     shape = MaterialTheme.shapes.large,
                     colors = CardDefaults.cardColors(
@@ -129,7 +176,7 @@ fun PaletteEditorScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             if (uiState.editingSwatchId != null) {
-                                OutlinedButton(onClick = viewModel::startNewSwatch) {
+                                OutlinedButton(onClick = onStartNewSwatch) {
                                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text("New")
@@ -143,7 +190,7 @@ fun PaletteEditorScreen(
                         ) {
                             OutlinedTextField(
                                 value = uiState.swatchNumberInput,
-                                onValueChange = viewModel::onSwatchNumberChanged,
+                                onValueChange = onSwatchNumberChanged,
                                 label = { Text("Swatch #") },
                                 singleLine = true,
                                 modifier = Modifier
@@ -152,14 +199,13 @@ fun PaletteEditorScreen(
                             )
                             OutlinedTextField(
                                 value = uiState.colorNameInput,
-                                onValueChange = viewModel::onColorNameChanged,
+                                onValueChange = onColorNameChanged,
                                 label = { Text("Color Name (optional)") },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
                             )
                         }
 
-                        // HEX input with live preview & strict regex validation
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             verticalAlignment = Alignment.Top,
@@ -167,14 +213,14 @@ fun PaletteEditorScreen(
                         ) {
                             OutlinedTextField(
                                 value = uiState.hexInput,
-                                onValueChange = viewModel::onHexInputChanged,
+                                onValueChange = onHexInputChanged,
                                 label = { Text("HEX Color (#RGB or #RRGGBB)") },
                                 singleLine = true,
                                 isError = !uiState.isHexValid,
                                 supportingText = {
                                     if (!uiState.isHexValid && uiState.hexValidationError != null) {
                                         Text(
-                                            text = uiState.hexValidationError!!,
+                                            text = uiState.hexValidationError,
                                             color = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.testTag("hex_error_text"),
                                         )
@@ -190,7 +236,6 @@ fun PaletteEditorScreen(
                                     .testTag("hex_input"),
                             )
 
-                            // Live color preview
                             Column(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier.padding(top = 6.dp),
@@ -232,7 +277,6 @@ fun PaletteEditorScreen(
                             }
                         }
 
-                        // Preset textile swatches for quick selection
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -241,9 +285,9 @@ fun PaletteEditorScreen(
                                 val presetColor = Color(HexColorValidator.parseArgbOrNull(hex) ?: 0xFF102A71.toInt())
                                 AssistChip(
                                     onClick = {
-                                        viewModel.onHexInputChanged(hex)
+                                        onHexInputChanged(hex)
                                         if (uiState.colorNameInput.isBlank()) {
-                                            viewModel.onColorNameChanged(label)
+                                            onColorNameChanged(label)
                                         }
                                     },
                                     leadingIcon = {
@@ -259,7 +303,6 @@ fun PaletteEditorScreen(
                             }
                         }
 
-                        // Optional Roll foreign key picker
                         Box {
                             val linkedRoll = uiState.availableRolls.firstOrNull { it.id == uiState.selectedRollId }
                             OutlinedButton(
@@ -279,7 +322,7 @@ fun PaletteEditorScreen(
                                 DropdownMenuItem(
                                     text = { Text("None (no roll linked)") },
                                     onClick = {
-                                        viewModel.onRollSelected(null)
+                                        onRollSelected(null)
                                         rollMenuExpanded = false
                                     },
                                 )
@@ -287,7 +330,7 @@ fun PaletteEditorScreen(
                                     DropdownMenuItem(
                                         text = { Text("${roll.rollCode} · #${roll.shadeLabel} · ${roll.colorName} (${roll.warehouseShed})") },
                                         onClick = {
-                                            viewModel.onRollSelected(roll.id)
+                                            onRollSelected(roll.id)
                                             rollMenuExpanded = false
                                         },
                                     )
@@ -296,7 +339,7 @@ fun PaletteEditorScreen(
                         }
 
                         Button(
-                            onClick = { viewModel.applyColorEditor() },
+                            onClick = onApplyColorEditor,
                             enabled = uiState.isHexValid && uiState.swatchNumberInput.isNotBlank(),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -311,7 +354,7 @@ fun PaletteEditorScreen(
             }
 
             uiState.statusMessage?.let { msg ->
-                item {
+                item(key = "palette_status_banner") {
                     Surface(
                         color = MaterialTheme.colorScheme.secondaryContainer,
                         shape = MaterialTheme.shapes.small,
@@ -326,7 +369,7 @@ fun PaletteEditorScreen(
                 }
             }
 
-            item {
+            item(key = "palette_swatch_section_header") {
                 Text(
                     text = "Swatches (${uiState.swatches.size}) — drag handle to reorder",
                     style = MaterialTheme.typography.titleSmall,
@@ -361,11 +404,10 @@ fun PaletteEditorScreen(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { viewModel.startEditingSwatch(sw) }
+                            .clickable { onStartEditingSwatch(sw) }
                             .padding(horizontal = 10.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // Drag handle for touch reordering
                         Icon(
                             imageVector = Icons.Rounded.DragHandle,
                             contentDescription = "Drag handle to reorder swatch #${sw.swatchNumber}",
@@ -395,14 +437,14 @@ fun PaletteEditorScreen(
                                                     draggedIndex < uiState.swatches.lastIndex
                                                 ) {
                                                     val next = draggedIndex + 1
-                                                    viewModel.moveSwatch(draggedIndex, next)
+                                                    onMoveSwatch(draggedIndex, next)
                                                     draggedIndex = next
                                                     dragAccumulatedY = 0f
                                                 } else if (dragAccumulatedY < -rowSwapThresholdPx &&
                                                     draggedIndex > 0
                                                 ) {
                                                     val prev = draggedIndex - 1
-                                                    viewModel.moveSwatch(draggedIndex, prev)
+                                                    onMoveSwatch(draggedIndex, prev)
                                                     draggedIndex = prev
                                                     dragAccumulatedY = 0f
                                                 }
@@ -438,19 +480,19 @@ fun PaletteEditorScreen(
                         }
 
                         if (index > 0) {
-                            IconButton(onClick = { viewModel.moveSwatch(index, index - 1) }) {
+                            IconButton(onClick = { onMoveSwatch(index, index - 1) }) {
                                 Icon(Icons.Rounded.ArrowUpward, contentDescription = "Move up")
                             }
                         }
                         if (index < uiState.swatches.lastIndex) {
-                            IconButton(onClick = { viewModel.moveSwatch(index, index + 1) }) {
+                            IconButton(onClick = { onMoveSwatch(index, index + 1) }) {
                                 Icon(Icons.Rounded.ArrowDownward, contentDescription = "Move down")
                             }
                         }
-                        IconButton(onClick = { viewModel.startEditingSwatch(sw) }) {
+                        IconButton(onClick = { onStartEditingSwatch(sw) }) {
                             Icon(Icons.Rounded.Edit, contentDescription = "Edit swatch")
                         }
-                        IconButton(onClick = { viewModel.deleteSwatch(sw.id) }) {
+                        IconButton(onClick = { onDeleteSwatch(sw.id) }) {
                             Icon(
                                 Icons.Rounded.Delete,
                                 contentDescription = "Delete swatch",
@@ -464,7 +506,7 @@ fun PaletteEditorScreen(
 
         Surface(tonalElevation = 3.dp, modifier = Modifier.fillMaxWidth()) {
             Button(
-                onClick = { viewModel.savePalette(onSavedNavigateToCart) },
+                onClick = onSavePalette,
                 enabled = !uiState.isSaving && uiState.cartId != null,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -477,5 +519,39 @@ fun PaletteEditorScreen(
                 Text("Save Palette Changes")
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun PaletteEditorScreenPreview() {
+    AlAzharTexTheme(preferences = ThemeSettings(useDynamicColor = false)) {
+        PaletteEditorScreen(
+            uiState = PaletteEditorUiState(
+                cartId = "cart-preview",
+                swatchNumberInput = "6",
+                hexInput = "#102A71",
+                swatches = listOf(
+                    SwatchInput(
+                        id = "sw-5",
+                        swatchNumber = "5",
+                        colorHex = "#102A71",
+                        colorName = "Azhar Navy",
+                        positionOrder = 0,
+                    ),
+                ),
+            ),
+            onStartNewSwatch = {},
+            onStartEditingSwatch = {},
+            onSwatchNumberChanged = {},
+            onColorNameChanged = {},
+            onHexInputChanged = {},
+            onRollSelected = {},
+            onApplyColorEditor = {},
+            onMoveSwatch = { _, _ -> },
+            onDeleteSwatch = {},
+            onSavePalette = {},
+        )
     }
 }

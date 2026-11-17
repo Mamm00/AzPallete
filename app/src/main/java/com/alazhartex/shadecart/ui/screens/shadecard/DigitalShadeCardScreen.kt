@@ -1,5 +1,7 @@
 package com.alazhartex.shadecart.ui.screens.shadecard
 
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -50,20 +52,29 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alazhartex.shadecart.R
-import com.alazhartex.shadecart.data.local.Roll
-import com.alazhartex.shadecart.data.local.ShadeCartWithDetails
-import com.alazhartex.shadecart.data.local.SwatchWithRoll
-import com.alazhartex.shadecart.data.local.SyncStatus
+import com.alazhartex.shadecart.domain.model.RollStockStatus
+import com.alazhartex.shadecart.domain.model.ShadeCartModel
+import com.alazhartex.shadecart.domain.model.SwatchModel
+import com.alazhartex.shadecart.domain.model.SyncState
+import com.alazhartex.shadecart.domain.model.ThemeSettings
+import com.alazhartex.shadecart.domain.model.WarehouseRollModel
 import com.alazhartex.shadecart.ui.components.BrandLogoBadge
 import com.alazhartex.shadecart.ui.components.PinkedSwatchCard
 import com.alazhartex.shadecart.ui.components.Rgb565PreviewImage
+import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 
+/**
+ * Stateful route composable collecting [DigitalShadeCardViewModel.uiState] via
+ * `collectAsStateWithLifecycle` and forwarding state + event callbacks to stateless
+ * [DigitalShadeCardScreen] (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
+ */
 @Composable
-fun DigitalShadeCardScreen(
+fun DigitalShadeCardRoute(
     onOpenCapture: () -> Unit,
     onEditCartImage: (cartId: String) -> Unit,
     onOpenPaletteEditor: (cartId: String) -> Unit,
@@ -71,7 +82,38 @@ fun DigitalShadeCardScreen(
     viewModel: DigitalShadeCardViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var rollDialogSwatch by remember { mutableStateOf<SwatchWithRoll?>(null) }
+
+    DigitalShadeCardScreen(
+        uiState = uiState,
+        onSelectCart = viewModel::selectCart,
+        onOpenCapture = onOpenCapture,
+        onEditCartImage = onEditCartImage,
+        onOpenPaletteEditor = onOpenPaletteEditor,
+        onAddSwatchManually = { viewModel.openManualPaletteEditor(onOpenPaletteEditor) },
+        onLinkSwatchToRoll = viewModel::linkSwatchToRoll,
+        loadPreviewBitmap = viewModel::loadPreviewBitmap,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Pure stateless UI screen presenting the active Al AzharTex Digital Shade Cart, header fabric
+ * metadata, two-column pinked swatches, empty state CTA, and warehouse roll linking modal
+ * (Pyre, Chapter 1.2, 4.4, 11.1, & 11.4).
+ */
+@Composable
+fun DigitalShadeCardScreen(
+    uiState: DigitalShadeCardUiState,
+    onSelectCart: (String) -> Unit,
+    onOpenCapture: () -> Unit,
+    onEditCartImage: (cartId: String) -> Unit,
+    onOpenPaletteEditor: (cartId: String) -> Unit,
+    onAddSwatchManually: () -> Unit,
+    onLinkSwatchToRoll: (SwatchModel, String?) -> Unit,
+    loadPreviewBitmap: suspend (String) -> Bitmap? = { null },
+    modifier: Modifier = Modifier,
+) {
+    var rollDialogSwatch by remember { mutableStateOf<SwatchModel?>(null) }
 
     if (uiState.isLoading) {
         Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -90,13 +132,13 @@ fun DigitalShadeCardScreen(
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (uiState.carts.size > 1) {
-            item {
+            item(key = "cart_selector_row") {
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(uiState.carts, key = { it.cart.id }) { item ->
+                    items(uiState.carts, key = { it.id }) { item ->
                         FilterChip(
-                            selected = item.cart.id == activeCart?.cart?.id,
-                            onClick = { viewModel.selectCart(item.cart.id) },
-                            label = { Text("${item.cart.fabricName} (${item.cart.fabricCode})") },
+                            selected = item.id == activeCart?.id,
+                            onClick = { onSelectCart(item.id) },
+                            label = { Text("${item.fabricName} (${item.fabricCode})") },
                         )
                     }
                 }
@@ -104,27 +146,27 @@ fun DigitalShadeCardScreen(
         }
 
         if (activeCart != null) {
-            item {
+            item(key = "active_cart_header_${activeCart.id}") {
                 ActiveCartHeaderCard(
-                    details = activeCart,
-                    bitmapProcessor = viewModel.bitmapProcessor,
-                    onEditImage = { onEditCartImage(activeCart.cart.id) },
-                    onEditPalette = { onOpenPaletteEditor(activeCart.cart.id) },
+                    cart = activeCart,
+                    loadPreviewBitmap = loadPreviewBitmap,
+                    onEditImage = { onEditCartImage(activeCart.id) },
+                    onEditPalette = { onOpenPaletteEditor(activeCart.id) },
                 )
             }
         }
 
         if (activeCart == null || activeCart.swatches.isEmpty()) {
-            item {
+            item(key = "no_swatches_empty_state") {
                 NoSwatchesEmptyState(
                     hasCart = activeCart != null,
-                    onAddSwatchManually = { viewModel.openManualPaletteEditor(onOpenPaletteEditor) },
+                    onAddSwatchManually = onAddSwatchManually,
                     onCaptureNewCart = onOpenCapture,
                 )
             }
         } else {
             val rows = activeCart.swatches.chunked(2)
-            items(rows, key = { pair -> pair.joinToString("-") { it.swatch.id } }) { pair ->
+            items(rows, key = { pair -> pair.joinToString("-") { it.id } }) { pair ->
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -146,11 +188,11 @@ fun DigitalShadeCardScreen(
 
     rollDialogSwatch?.let { target ->
         RollInventoryLinkDialog(
-            swatchWithRoll = target,
+            swatch = target,
             rolls = uiState.availableRolls,
             onDismiss = { rollDialogSwatch = null },
             onSelectRoll = { rollId ->
-                viewModel.linkSwatchToRoll(target, rollId)
+                onLinkSwatchToRoll(target, rollId)
                 rollDialogSwatch = null
             },
         )
@@ -159,12 +201,11 @@ fun DigitalShadeCardScreen(
 
 @Composable
 private fun ActiveCartHeaderCard(
-    details: ShadeCartWithDetails,
-    bitmapProcessor: com.alazhartex.shadecart.domain.imaging.BitmapProcessor,
+    cart: ShadeCartModel,
+    loadPreviewBitmap: suspend (String) -> Bitmap?,
     onEditImage: () -> Unit,
     onEditPalette: () -> Unit,
 ) {
-    val cart = details.cart
     Card(
         shape = MaterialTheme.shapes.large,
         colors = CardDefaults.cardColors(
@@ -192,9 +233,10 @@ private fun ActiveCartHeaderCard(
                 }
 
                 val syncLabel = when (cart.syncStatus) {
-                    SyncStatus.SYNCED -> "Synced"
-                    SyncStatus.CONFLICT -> "Conflict"
-                    else -> "Pending Sync"
+                    SyncState.SYNCED -> "Synced"
+                    SyncState.CONFLICT -> "Conflict"
+                    SyncState.FAILED -> "Sync Failed"
+                    SyncState.PENDING -> "Pending Sync"
                 }
                 AssistChip(
                     onClick = {},
@@ -232,7 +274,7 @@ private fun ActiveCartHeaderCard(
                 Spacer(modifier = Modifier.height(10.dp))
                 Rgb565PreviewImage(
                     imagePath = previewPath,
-                    bitmapProcessor = bitmapProcessor,
+                    loadBitmap = loadPreviewBitmap,
                     contentDescription = "Captured shade cart thumbnail",
                     contentScale = ContentScale.Crop,
                     modifier = Modifier
@@ -333,16 +375,16 @@ private fun NoSwatchesEmptyState(
 
 @Composable
 private fun RollInventoryLinkDialog(
-    swatchWithRoll: SwatchWithRoll,
-    rolls: List<Roll>,
+    swatch: SwatchModel,
+    rolls: List<WarehouseRollModel>,
     onDismiss: () -> Unit,
     onSelectRoll: (String?) -> Unit,
 ) {
-    val currentRoll = swatchWithRoll.roll
+    val currentRoll = swatch.linkedRoll
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Rounded.Inventory2, contentDescription = null) },
-        title = { Text("Swatch #${swatchWithRoll.swatch.swatchNumber} · Roll Inventory") },
+        title = { Text("Swatch #${swatch.swatchNumber} · Roll Inventory") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 if (currentRoll != null) {
@@ -353,7 +395,7 @@ private fun RollInventoryLinkDialog(
                     ) {
                         Column(modifier = Modifier.padding(10.dp)) {
                             Text(
-                                text = "Linked: ${currentRoll.rollCode} (${currentRoll.status})",
+                                text = "Linked: ${currentRoll.rollCode} (${currentRoll.status.name})",
                                 style = MaterialTheme.typography.titleSmall,
                                 fontWeight = FontWeight.Bold,
                             )
@@ -407,7 +449,7 @@ private fun RollInventoryLinkDialog(
                                 fontWeight = FontWeight.Medium,
                             )
                             Text(
-                                text = "${roll.warehouseShed} · ${roll.lengthMeters} m · ${roll.status}",
+                                text = "${roll.warehouseShed} · ${roll.lengthMeters} m · ${roll.status.name}",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -422,4 +464,70 @@ private fun RollInventoryLinkDialog(
             }
         },
     )
+}
+
+@Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun DigitalShadeCardScreenPreview() {
+    val sampleCart = ShadeCartModel(
+        id = "cart-preview",
+        fabricTypeId = "fab-silk-180",
+        fabricName = "Silk 180",
+        fabricCode = "SLK-180",
+        weightGsm = 180,
+        widthCm = 150,
+        originalImagePath = null,
+        editedImagePath = null,
+        editStackJson = "{}",
+        syncStatus = SyncState.SYNCED,
+        version = 2L,
+        swatches = listOf(
+            SwatchModel(
+                id = "sw-1",
+                shadeCartId = "cart-preview",
+                fabricTypeId = "fab-silk-180",
+                swatchNumber = "5",
+                colorHex = "#102A71",
+                colorName = "Azhar Navy",
+                positionOrder = 0,
+                linkedRoll = WarehouseRollModel(
+                    id = "roll-1",
+                    rollCode = "RL-SLK-005",
+                    fabricTypeId = "fab-silk-180",
+                    shadeLabel = "5",
+                    colorName = "Azhar Navy",
+                    colorHex = "#102A71",
+                    warehouseShed = "wh-alwa",
+                    lengthMeters = 480.0,
+                    status = RollStockStatus.IN_STOCK,
+                ),
+            ),
+            SwatchModel(
+                id = "sw-2",
+                shadeCartId = "cart-preview",
+                fabricTypeId = "fab-silk-180",
+                swatchNumber = "7",
+                colorHex = "#CD1820",
+                colorName = "Crimson Star",
+                positionOrder = 1,
+            ),
+        ),
+    )
+    AlAzharTexTheme(preferences = ThemeSettings(useDynamicColor = false)) {
+        DigitalShadeCardScreen(
+            uiState = DigitalShadeCardUiState(
+                carts = listOf(sampleCart),
+                selectedCartId = sampleCart.id,
+                activeCart = sampleCart,
+                isLoading = false,
+            ),
+            onSelectCart = {},
+            onOpenCapture = {},
+            onEditCartImage = {},
+            onOpenPaletteEditor = {},
+            onAddSwatchManually = {},
+            onLinkSwatchToRoll = { _, _ -> },
+        )
+    }
 }

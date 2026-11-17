@@ -39,25 +39,35 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import com.alazhartex.shadecart.data.local.SyncQueueEntity
-import com.alazhartex.shadecart.data.local.SyncStatus
-import com.alazhartex.shadecart.data.prefs.AccentPaletteId
-import com.alazhartex.shadecart.data.prefs.ThemeMode
-import com.alazhartex.shadecart.data.prefs.ThemePreferences
+import com.alazhartex.shadecart.BuildConfig
+import com.alazhartex.shadecart.domain.model.AccentPaletteSetting
+import com.alazhartex.shadecart.domain.model.SyncQueueEntryModel
+import com.alazhartex.shadecart.domain.model.SyncState
+import com.alazhartex.shadecart.domain.model.ThemeModeSetting
+import com.alazhartex.shadecart.domain.model.ThemeSettings
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
 
+/**
+ * Stateless Material 3 [ModalBottomSheet] exposing DataStore-backed appearance preferences and
+ * background sync queue diagnostics.
+ *
+ * The QA conflict-simulation button is gated behind [showDebugSyncTools] (`BuildConfig.DEBUG`) so
+ * release APK builds hide debug-only test controls (Pyre, *Android Development with Jetpack Compose
+ * & Kotlin*, Chapter 5.4, 10.4, & 12.1).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ThemeAndSyncSettingsSheet(
-    preferences: ThemePreferences,
-    syncQueue: List<SyncQueueEntity>,
+    preferences: ThemeSettings,
+    syncQueue: List<SyncQueueEntryModel>,
     isConflictArmed: Boolean,
     onDismiss: () -> Unit,
-    onSelectThemeMode: (ThemeMode) -> Unit,
+    onSelectThemeMode: (ThemeModeSetting) -> Unit,
     onToggleDynamicColor: (Boolean) -> Unit,
-    onSelectAccentPalette: (AccentPaletteId) -> Unit,
+    onSelectAccentPalette: (AccentPaletteSetting) -> Unit,
     onSyncNow: () -> Unit,
     onArmSimulatedConflict: () -> Unit,
+    showDebugSyncTools: Boolean = BuildConfig.DEBUG,
 ) {
     ModalBottomSheet(onDismissRequest = onDismiss) {
         Column(
@@ -81,7 +91,7 @@ fun ThemeAndSyncSettingsSheet(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                ThemeMode.entries.forEach { mode ->
+                ThemeModeSetting.entries.forEach { mode ->
                     FilterChip(
                         selected = preferences.themeMode == mode,
                         onClick = { onSelectThemeMode(mode) },
@@ -130,7 +140,7 @@ fun ThemeAndSyncSettingsSheet(
             )
             Spacer(modifier = Modifier.height(8.dp))
 
-            AccentPaletteId.entries.forEach { palette ->
+            AccentPaletteSetting.entries.forEach { palette ->
                 val selected = preferences.accentPalette == palette
                 val primaryColor = Color(HexColorValidator.parseArgbOrNull(palette.primaryHex) ?: 0xFF102A71.toInt())
                 val secondaryColor = Color(HexColorValidator.parseArgbOrNull(palette.secondaryHex) ?: 0xFFD90A0A.toInt())
@@ -179,15 +189,15 @@ fun ThemeAndSyncSettingsSheet(
             Spacer(modifier = Modifier.height(14.dp))
 
             Text(
-                text = "Sync Queue & Conflict Tools",
+                text = "Sync Queue & Diagnostics",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
             )
             Spacer(modifier = Modifier.height(6.dp))
 
-            val pendingCount = syncQueue.count { it.status == SyncStatus.PENDING }
-            val syncedCount = syncQueue.count { it.status == SyncStatus.SYNCED }
-            val conflictCount = syncQueue.count { it.status == SyncStatus.CONFLICT }
+            val pendingCount = syncQueue.count { it.status == SyncState.PENDING }
+            val syncedCount = syncQueue.count { it.status == SyncState.SYNCED }
+            val conflictCount = syncQueue.count { it.status == SyncState.CONFLICT }
 
             Text(
                 text = "Pending: $pendingCount · Synced: $syncedCount · Conflicts: $conflictCount",
@@ -209,13 +219,17 @@ fun ThemeAndSyncSettingsSheet(
                     Spacer(modifier = Modifier.width(6.dp))
                     Text("Sync Now")
                 }
-                OutlinedButton(
-                    onClick = onArmSimulatedConflict,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Icon(Icons.Rounded.WarningAmber, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(if (isConflictArmed) "Armed" else "Simulate Conflict")
+                if (showDebugSyncTools) {
+                    OutlinedButton(
+                        onClick = onArmSimulatedConflict,
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("simulate_conflict_debug_button"),
+                    ) {
+                        Icon(Icons.Rounded.WarningAmber, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(if (isConflictArmed) "Armed" else "Simulate Conflict")
+                    }
                 }
             }
         }

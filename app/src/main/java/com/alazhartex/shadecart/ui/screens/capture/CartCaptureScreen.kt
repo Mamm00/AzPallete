@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -65,6 +66,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.tooling.preview.Preview as ComposePreview
 import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
@@ -72,17 +74,28 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alazhartex.shadecart.R
+import com.alazhartex.shadecart.domain.model.ThemeSettings
+import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 import kotlinx.coroutines.guava.await
+import java.io.File
 import java.util.concurrent.Executors
 
+/**
+ * Runtime camera permission states governing viewfinder vs rationale / settings deep-link UI.
+ */
 enum class CameraPermissionStatus {
     GRANTED,
     DENIED_SHOW_RATIONALE,
     PERMANENTLY_DENIED,
 }
 
+/**
+ * Stateful route composable collecting [CartCaptureViewModel.uiState], binding Android runtime
+ * permission + Photo Picker activity-result launchers, and delegating rendering to stateless
+ * [CartCaptureScreen] (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
+ */
 @Composable
-fun CartCaptureScreen(
+fun CartCaptureRoute(
     onImageReadyForEdit: (String) -> Unit,
     modifier: Modifier = Modifier,
     permissionStatusOverride: CameraPermissionStatus? = null,
@@ -132,14 +145,56 @@ fun CartCaptureScreen(
         context.startActivity(intent)
     }
 
+    CartCaptureScreen(
+        uiState = uiState,
+        permissionStatus = effectivePermissionStatus,
+        onRequestCameraPermission = {
+            viewModel.markCameraPermissionRequested()
+            permissionLauncher.launch(Manifest.permission.CAMERA)
+        },
+        onOpenAppSettings = openAppSettings,
+        onPrepareTempCaptureFile = viewModel::prepareTempCaptureFile,
+        onPhotoCaptured = { file -> viewModel.onPhotoCaptured(file, onImageReadyForEdit) },
+        onCaptureError = viewModel::onCaptureError,
+        onPickGalleryPhoto = {
+            photoPickerLauncher.launch(
+                PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+            )
+        },
+        onLoadSampleCart = { viewModel.onLoadSampleCart(onImageReadyForEdit) },
+        onResumePendingCapture = { viewModel.resumePendingCapture(onImageReadyForEdit) },
+        onDiscardRestorableCapture = viewModel::discardRestorableCapture,
+        modifier = modifier,
+    )
+}
+
+/**
+ * Pure stateless UI screen presenting process-death capture recovery, CameraX Compose viewfinder,
+ * permission rationale/settings fallback cards, gallery Photo Picker trigger, and bundled sample A4
+ * shade cart loader (Pyre, Chapter 1.2, 4.4, & 11.4).
+ */
+@Composable
+fun CartCaptureScreen(
+    uiState: CartCaptureUiState,
+    permissionStatus: CameraPermissionStatus,
+    onRequestCameraPermission: () -> Unit,
+    onOpenAppSettings: () -> Unit,
+    onPrepareTempCaptureFile: () -> File,
+    onPhotoCaptured: (File) -> Unit,
+    onCaptureError: (String) -> Unit,
+    onPickGalleryPhoto: () -> Unit,
+    onLoadSampleCart: () -> Unit,
+    onResumePendingCapture: () -> Unit,
+    onDiscardRestorableCapture: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
-        // Process-death recovery banner for in-progress capture temp files
-        uiState.restorableCapturePath?.let { path ->
+        uiState.restorableCapturePath?.let {
             Card(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.secondaryContainer,
@@ -174,10 +229,10 @@ fun CartCaptureScreen(
                         }
                     }
                     Row {
-                        TextButton(onClick = viewModel::discardRestorableCapture) {
+                        TextButton(onClick = onDiscardRestorableCapture) {
                             Text("Discard")
                         }
-                        Button(onClick = { viewModel.resumePendingCapture(onImageReadyForEdit) }) {
+                        Button(onClick = onResumePendingCapture) {
                             Text("Resume")
                         }
                     }
@@ -200,37 +255,36 @@ fun CartCaptureScreen(
             }
         }
 
-        // Main viewfinder or permission rationale area
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f),
             contentAlignment = Alignment.Center,
         ) {
-            when (effectivePermissionStatus) {
+            when (permissionStatus) {
                 CameraPermissionStatus.GRANTED -> {
                     CameraCapturePreviewBox(
                         isBusy = uiState.isBusy,
                         onCaptureClick = { imageCapture, executor ->
-                            val tempFile = viewModel.prepareTempCaptureFile()
+                            val tempFile = onPrepareTempCaptureFile()
                             val options = ImageCapture.OutputFileOptions.Builder(tempFile).build()
                             imageCapture.takePicture(
                                 options,
                                 executor,
                                 object : ImageCapture.OnImageSavedCallback {
                                     override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
-                                        viewModel.onPhotoCaptured(tempFile, onImageReadyForEdit)
+                                        onPhotoCaptured(tempFile)
                                     }
 
                                     override fun onError(exception: ImageCaptureException) {
-                                        viewModel.onCaptureError(
+                                        onCaptureError(
                                             exception.message ?: "Camera capture error",
                                         )
                                     }
                                 },
                             )
                         },
-                        onCameraError = viewModel::onCaptureError,
+                        onCameraError = onCaptureError,
                     )
                 }
 
@@ -239,11 +293,8 @@ fun CartCaptureScreen(
                         title = stringResource(R.string.camera_rationale_title),
                         body = stringResource(R.string.camera_rationale_body),
                         isPermanent = false,
-                        onRequestPermission = {
-                            viewModel.markCameraPermissionRequested()
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        },
-                        onOpenSettings = openAppSettings,
+                        onRequestPermission = onRequestCameraPermission,
+                        onOpenSettings = onOpenAppSettings,
                     )
                 }
 
@@ -252,11 +303,8 @@ fun CartCaptureScreen(
                         title = stringResource(R.string.camera_rationale_title),
                         body = stringResource(R.string.camera_permanently_denied_body),
                         isPermanent = true,
-                        onRequestPermission = {
-                            viewModel.markCameraPermissionRequested()
-                            permissionLauncher.launch(Manifest.permission.CAMERA)
-                        },
-                        onOpenSettings = openAppSettings,
+                        onRequestPermission = onRequestCameraPermission,
+                        onOpenSettings = onOpenAppSettings,
                     )
                 }
             }
@@ -282,17 +330,12 @@ fun CartCaptureScreen(
             }
         }
 
-        // Upload & sample shortcuts (always available even when camera permission is denied)
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             FilledTonalButton(
-                onClick = {
-                    photoPickerLauncher.launch(
-                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
-                    )
-                },
+                onClick = onPickGalleryPhoto,
                 enabled = !uiState.isBusy,
                 modifier = Modifier
                     .weight(1f)
@@ -304,7 +347,7 @@ fun CartCaptureScreen(
             }
 
             OutlinedButton(
-                onClick = { viewModel.onLoadSampleCart(onImageReadyForEdit) },
+                onClick = onLoadSampleCart,
                 enabled = !uiState.isBusy,
                 modifier = Modifier
                     .weight(1f)
@@ -387,7 +430,6 @@ private fun CameraCapturePreviewBox(
                 }
             }
 
-            // Subtle A4 framing guide overlay
             Surface(
                 modifier = Modifier
                     .fillMaxSize()
@@ -488,4 +530,25 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
     is ContextWrapper -> baseContext.findActivity()
     else -> null
+}
+
+@ComposePreview(showBackground = true)
+@ComposePreview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun CartCaptureScreenRationalePreview() {
+    AlAzharTexTheme(preferences = ThemeSettings(useDynamicColor = false)) {
+        CartCaptureScreen(
+            uiState = CartCaptureUiState(),
+            permissionStatus = CameraPermissionStatus.DENIED_SHOW_RATIONALE,
+            onRequestCameraPermission = {},
+            onOpenAppSettings = {},
+            onPrepareTempCaptureFile = { File("/tmp/preview.jpg") },
+            onPhotoCaptured = {},
+            onCaptureError = {},
+            onPickGalleryPhoto = {},
+            onLoadSampleCart = {},
+            onResumePendingCapture = {},
+            onDiscardRestorableCapture = {},
+        )
+    }
 }

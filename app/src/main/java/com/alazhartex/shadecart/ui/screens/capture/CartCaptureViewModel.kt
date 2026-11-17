@@ -14,6 +14,10 @@ import kotlinx.coroutines.launch
 import java.io.File
 import javax.inject.Inject
 
+/**
+ * Immutable presentation state for the A4 Shade Cart Capture & Upload screen
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3).
+ */
 data class CartCaptureUiState(
     val isBusy: Boolean = false,
     val restorableCapturePath: String? = null,
@@ -22,6 +26,11 @@ data class CartCaptureUiState(
     val errorMessage: String? = null,
 )
 
+/**
+ * `@HiltViewModel` coordinating CameraX capture temp files, Photo Picker gallery imports, sample
+ * A4 asset loading, and `SavedStateHandle` process-death recovery
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.2, 6.3, & 7.1).
+ */
 @HiltViewModel
 class CartCaptureViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
@@ -38,7 +47,7 @@ class CartCaptureViewModel @Inject constructor(
     val uiState: StateFlow<CartCaptureUiState> = _uiState.asStateFlow()
 
     private fun restoreInitialState(): CartCaptureUiState {
-        // Survive process death: if an in-progress temp/original capture file exists on disk, surface it
+        // Survive process death: if an in-progress temp/original capture file exists on disk, surface it.
         val savedFinal = savedStateHandle.get<String>(KEY_RESTORABLE_PATH)
             ?.takeIf { File(it).exists() }
         val savedTemp = savedStateHandle.get<String>(KEY_TEMP_CAPTURE_PATH)

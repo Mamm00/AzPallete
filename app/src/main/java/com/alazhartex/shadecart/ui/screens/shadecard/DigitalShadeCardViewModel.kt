@@ -1,16 +1,20 @@
 package com.alazhartex.shadecart.ui.screens.shadecard
 
+import android.graphics.Bitmap
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.alazhartex.shadecart.data.local.Roll
-import com.alazhartex.shadecart.data.local.ShadeCartWithDetails
-import com.alazhartex.shadecart.data.local.SwatchWithRoll
-import com.alazhartex.shadecart.data.repo.SaveResult
-import com.alazhartex.shadecart.data.repo.ShadeCartDraft
-import com.alazhartex.shadecart.data.repo.ShadeCartRepository
-import com.alazhartex.shadecart.data.repo.SwatchDraft
 import com.alazhartex.shadecart.domain.imaging.BitmapProcessor
+import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
+import com.alazhartex.shadecart.domain.model.ShadeCartModel
+import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
+import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.SwatchModel
+import com.alazhartex.shadecart.domain.model.WarehouseRollModel
+import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartsUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveWarehouseRollsUseCase
+import com.alazhartex.shadecart.domain.usecase.UpdateShadeCartSwatchesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -20,19 +24,30 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Immutable presentation state for the Digital Shade Card showcase screen, built exclusively from
+ * pure Kotlin domain models (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3 & 10.1).
+ */
 data class DigitalShadeCardUiState(
-    val carts: List<ShadeCartWithDetails> = emptyList(),
+    val carts: List<ShadeCartModel> = emptyList(),
     val selectedCartId: String? = null,
-    val activeCart: ShadeCartWithDetails? = null,
-    val availableRolls: List<Roll> = emptyList(),
+    val activeCart: ShadeCartModel? = null,
+    val availableRolls: List<WarehouseRollModel> = emptyList(),
     val isLoading: Boolean = true,
 )
 
+/**
+ * `@HiltViewModel` backing [DigitalShadeCardRoute], consuming UseCases only and exposing a
+ * single reactive `StateFlow` via `stateIn(WhileSubscribed)` (Pyre, Chapter 1.2, 6.3, & 10.1).
+ */
 @HiltViewModel
 class DigitalShadeCardViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
-    private val repository: ShadeCartRepository,
-    val bitmapProcessor: BitmapProcessor,
+    observeShadeCarts: ObserveShadeCartsUseCase,
+    observeWarehouseRolls: ObserveWarehouseRollsUseCase,
+    private val createOrGetShadeCart: CreateOrGetShadeCartUseCase,
+    private val updateShadeCartSwatches: UpdateShadeCartSwatchesUseCase,
+    private val bitmapProcessor: BitmapProcessor,
 ) : ViewModel() {
 
     companion object {
@@ -42,19 +57,19 @@ class DigitalShadeCardViewModel @Inject constructor(
     private val selectedCartIdFlow = MutableStateFlow(savedStateHandle.get<String>(KEY_CART_ID))
 
     val uiState: StateFlow<DigitalShadeCardUiState> = combine(
-        repository.observeCarts(),
+        observeShadeCarts(),
         selectedCartIdFlow,
-        repository.observeRolls(),
+        observeWarehouseRolls(null),
     ) { carts, requestedId, rolls ->
-        val active = carts.firstOrNull { it.cart.id == requestedId } ?: carts.firstOrNull()
-        val matchingRolls = if (active?.cart?.fabricTypeId != null) {
-            rolls.filter { it.fabricTypeId == active.cart.fabricTypeId }
+        val active = carts.firstOrNull { it.id == requestedId } ?: carts.firstOrNull()
+        val matchingRolls = if (active?.fabricTypeId != null) {
+            rolls.filter { it.fabricTypeId == active.fabricTypeId }
         } else {
             rolls
         }
         DigitalShadeCardUiState(
             carts = carts,
-            selectedCartId = active?.cart?.id,
+            selectedCartId = active?.id,
             activeCart = active,
             availableRolls = matchingRolls.ifEmpty { rolls },
             isLoading = false,
@@ -65,20 +80,26 @@ class DigitalShadeCardViewModel @Inject constructor(
         initialValue = DigitalShadeCardUiState(),
     )
 
+    /** Decodes a memory-bounded `RGB_565` thumbnail bitmap off the main thread. */
+    suspend fun loadPreviewBitmap(imagePath: String): Bitmap? =
+        bitmapProcessor.loadRgb565Preview(imagePath)
+
+    /** Persists the active cart selection in [SavedStateHandle] across configuration changes. */
     fun selectCart(cartId: String) {
         savedStateHandle[KEY_CART_ID] = cartId
         selectedCartIdFlow.value = cartId
     }
 
+    /** Opens the manual Palette Editor on the active cart or provisions a Silk 180 draft first. */
     fun openManualPaletteEditor(onNavigateToPalette: (String) -> Unit) {
         val current = uiState.value.activeCart
         if (current != null) {
-            onNavigateToPalette(current.cart.id)
+            onNavigateToPalette(current.id)
             return
         }
         viewModelScope.launch {
-            val result = repository.createOrGetDraftCart(
-                ShadeCartDraft(
+            val result = createOrGetShadeCart(
+                ShadeCartCreateInput(
                     fabricTypeId = "fab-silk-180",
                     fabricName = "Silk 180",
                     fabricCode = "SLK-180",
@@ -87,22 +108,22 @@ class DigitalShadeCardViewModel @Inject constructor(
                     swatches = emptyList(),
                 ),
             )
-            if (result is SaveResult.Success) {
+            if (result is ShadeCartSaveOutcome.Saved) {
                 selectCart(result.cartId)
                 onNavigateToPalette(result.cartId)
             }
         }
     }
 
-    fun linkSwatchToRoll(target: SwatchWithRoll, rollId: String?) {
+    /** Links or unlinks [target] swatch to a warehouse [WarehouseRollModel] with optimistic locking. */
+    fun linkSwatchToRoll(target: SwatchModel, rollId: String?) {
         val cart = uiState.value.activeCart ?: return
         viewModelScope.launch {
-            val updatedSwatches = cart.swatches.map { entry ->
-                val sw = entry.swatch
-                SwatchDraft(
+            val updatedSwatches = cart.swatches.map { sw ->
+                SwatchInput(
                     id = sw.id,
                     fabricTypeId = sw.fabricTypeId,
-                    rollId = if (sw.id == target.swatch.id) rollId else sw.rollId,
+                    rollId = if (sw.id == target.id) rollId else sw.rollId,
                     swatchNumber = sw.swatchNumber,
                     colorHex = sw.colorHex,
                     colorName = sw.colorName,
@@ -115,9 +136,9 @@ class DigitalShadeCardViewModel @Inject constructor(
                     version = sw.version,
                 )
             }
-            repository.updateSwatchesWithOptimisticLock(
-                cartId = cart.cart.id,
-                expectedCartVersion = cart.cart.version,
+            updateShadeCartSwatches(
+                cartId = cart.id,
+                expectedCartVersion = cart.version,
                 swatches = updatedSwatches,
             )
         }

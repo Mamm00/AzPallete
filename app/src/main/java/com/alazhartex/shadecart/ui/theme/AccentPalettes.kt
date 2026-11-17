@@ -4,8 +4,13 @@ import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.ui.graphics.Color
-import com.alazhartex.shadecart.data.prefs.AccentPaletteId
+import com.alazhartex.shadecart.domain.model.AccentPaletteSetting
 
+/**
+ * Curated Material 3 light and dark [ColorScheme] definitions matching Al AzharTex textile brand
+ * palettes when Material You dynamic color is disabled or unavailable (pre-Android 12)
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 5.2 & Chapter 5.4).
+ */
 object AccentPalettes {
 
     private val AzharNavyCrimsonLight = lightColorScheme(
@@ -124,14 +129,15 @@ object AccentPalettes {
         surfaceVariant = Color(0xFF332B27),
     )
 
-    fun colorSchemeFor(palette: AccentPaletteId, darkTheme: Boolean): ColorScheme = when (palette) {
-        AccentPaletteId.AZHAR_NAVY_CRIMSON ->
+    /** Resolves the Material 3 [ColorScheme] for [palette] and [darkTheme]. */
+    fun colorSchemeFor(palette: AccentPaletteSetting, darkTheme: Boolean): ColorScheme = when (palette) {
+        AccentPaletteSetting.AZHAR_NAVY_CRIMSON ->
             if (darkTheme) AzharNavyCrimsonDark else AzharNavyCrimsonLight
-        AccentPaletteId.AZHAR_EMERALD_SAND ->
+        AccentPaletteSetting.AZHAR_EMERALD_SAND ->
             if (darkTheme) AzharEmeraldSandDark else AzharEmeraldSandLight
-        AccentPaletteId.ROYAL_INDIGO_GOLD ->
+        AccentPaletteSetting.ROYAL_INDIGO_GOLD ->
             if (darkTheme) RoyalIndigoGoldDark else RoyalIndigoGoldLight
-        AccentPaletteId.TERRACOTTA_CHARCOAL ->
+        AccentPaletteSetting.TERRACOTTA_CHARCOAL ->
             if (darkTheme) TerracottaCharcoalDark else TerracottaCharcoalLight
     }
 }

@@ -10,9 +10,8 @@ import androidx.compose.material3.dynamicLightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
-import com.alazhartex.shadecart.data.prefs.AccentPaletteId
-import com.alazhartex.shadecart.data.prefs.ThemeMode
-import com.alazhartex.shadecart.data.prefs.ThemePreferences
+import com.alazhartex.shadecart.domain.model.ThemeModeSetting
+import com.alazhartex.shadecart.domain.model.ThemeSettings
 
 private val AlAzharShapes = Shapes(
     extraSmall = RoundedCornerShape(6.dp),
@@ -22,15 +21,20 @@ private val AlAzharShapes = Shapes(
     extraLarge = RoundedCornerShape(32.dp),
 )
 
+/**
+ * Top-level Material 3 theme composable applying dynamic color (Android 12+), system/light/dark
+ * mode preferences, custom [AccentPalettes], [AlAzharTypography], and rounded [AlAzharShapes]
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 5.1, 5.2, & 5.4).
+ */
 @Composable
 fun AlAzharTexTheme(
-    preferences: ThemePreferences = ThemePreferences(),
+    preferences: ThemeSettings = ThemeSettings(),
     content: @Composable () -> Unit,
 ) {
     val darkTheme = when (preferences.themeMode) {
-        ThemeMode.SYSTEM -> isSystemInDarkTheme()
-        ThemeMode.LIGHT -> false
-        ThemeMode.DARK -> true
+        ThemeModeSetting.SYSTEM -> isSystemInDarkTheme()
+        ThemeModeSetting.LIGHT -> false
+        ThemeModeSetting.DARK -> true
     }
 
     val colorScheme = if (preferences.useDynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
@@ -45,6 +49,7 @@ fun AlAzharTexTheme(
 
     MaterialTheme(
         colorScheme = colorScheme,
+        typography = AlAzharTypography,
         shapes = AlAzharShapes,
         content = content,
     )

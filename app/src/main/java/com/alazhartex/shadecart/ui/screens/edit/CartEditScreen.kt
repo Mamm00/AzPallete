@@ -1,5 +1,7 @@
 package com.alazhartex.shadecart.ui.screens.edit
 
+import android.content.res.Configuration
+import android.graphics.Bitmap
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -57,6 +59,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
@@ -64,20 +67,72 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alazhartex.shadecart.R
 import com.alazhartex.shadecart.data.model.CropAspectPreset
 import com.alazhartex.shadecart.data.model.NormalizedRect
+import com.alazhartex.shadecart.domain.model.ThemeSettings
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
 import com.alazhartex.shadecart.domain.vision.SegmentationModelState
 import com.alazhartex.shadecart.ui.components.Rgb565PreviewImage
+import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 import com.canhub.cropper.CropImageView
 import java.io.File
 
-@OptIn(ExperimentalLayoutApi::class)
+/**
+ * Stateful route composable collecting [CartEditViewModel.uiState] via
+ * `collectAsStateWithLifecycle` and delegating rendering to stateless [CartEditScreen]
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
+ */
 @Composable
-fun CartEditScreen(
+fun CartEditRoute(
     onSavedNavigateToCart: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: CartEditViewModel = hiltViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+
+    CartEditScreen(
+        uiState = uiState,
+        loadPreviewBitmap = viewModel::loadPreviewBitmap,
+        onDownloadSegmentationModel = viewModel::downloadSegmentationModel,
+        onSetAspectPreset = viewModel::setAspectPreset,
+        onApplyCrop = viewModel::applyCrop,
+        onToggleBackgroundRemoval = viewModel::toggleBackgroundRemoval,
+        onRotate90Degrees = viewModel::rotate90Degrees,
+        onResetToOriginal = viewModel::resetToOriginal,
+        onAnalyzeCurrentImage = viewModel::analyzeCurrentImage,
+        onFabricNameChanged = viewModel::onFabricNameChanged,
+        onFabricCodeChanged = viewModel::onFabricCodeChanged,
+        onWeightGsmChanged = viewModel::onWeightGsmChanged,
+        onWidthCmChanged = viewModel::onWidthCmChanged,
+        onSwatchNumberEdited = viewModel::onSwatchNumberEdited,
+        onSaveShadeCart = { viewModel.saveShadeCart(onSavedNavigateToCart) },
+        modifier = modifier,
+    )
+}
+
+/**
+ * Pure stateless UI screen presenting the CanHub non-destructive card editor, ML Kit Subject
+ * Segmentation prompt/fallback banner, OCR header fields, detected pinked-swatch previews, and
+ * Save action (Pyre, Chapter 1.2, 4.4, & 11.4).
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun CartEditScreen(
+    uiState: CartEditUiState,
+    onDownloadSegmentationModel: () -> Unit,
+    onSetAspectPreset: (CropAspectPreset) -> Unit,
+    onApplyCrop: (NormalizedRect) -> Unit,
+    onToggleBackgroundRemoval: () -> Unit,
+    onRotate90Degrees: () -> Unit,
+    onResetToOriginal: () -> Unit,
+    onAnalyzeCurrentImage: () -> Unit,
+    onFabricNameChanged: (String) -> Unit,
+    onFabricCodeChanged: (String) -> Unit,
+    onWeightGsmChanged: (String) -> Unit,
+    onWidthCmChanged: (String) -> Unit,
+    onSwatchNumberEdited: (String, String) -> Unit,
+    onSaveShadeCart: () -> Unit,
+    modifier: Modifier = Modifier,
+    loadPreviewBitmap: suspend (String) -> Bitmap? = { null },
+) {
     var cropViewRef by remember { mutableStateOf<CropImageView?>(null) }
     var lastLoadedSource by remember { mutableStateOf<String?>(null) }
     var cropEditorActive by remember { mutableStateOf(false) }
@@ -106,7 +161,6 @@ fun CartEditScreen(
             }
         }
 
-        // ML Kit Subject Segmentation download prompt / crop-only fallback banner
         when (val segState = uiState.segmentationModelState) {
             is SegmentationModelState.NotDownloaded -> {
                 Card(
@@ -131,7 +185,7 @@ fun CartEditScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             Button(
-                                onClick = viewModel::downloadSegmentationModel,
+                                onClick = onDownloadSegmentationModel,
                                 modifier = Modifier.testTag("download_mlkit_model_button"),
                             ) {
                                 Icon(Icons.Rounded.CloudDownload, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -188,7 +242,6 @@ fun CartEditScreen(
             else -> Unit
         }
 
-        // Visual non-destructive editor card (CanHub CropImageView + RGB_565 preview)
         Card(
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
@@ -264,7 +317,7 @@ fun CartEditScreen(
                     } else {
                         Rgb565PreviewImage(
                             imagePath = uiState.workingPreviewPath ?: uiState.originalImagePath,
-                            bitmapProcessor = viewModel.bitmapProcessor,
+                            loadBitmap = loadPreviewBitmap,
                             contentDescription = "Shade card preview",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier
@@ -288,7 +341,6 @@ fun CartEditScreen(
 
                 Spacer(modifier = Modifier.height(10.dp))
 
-                // Free & fixed-aspect ratio preset chips
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -298,7 +350,7 @@ fun CartEditScreen(
                             selected = uiState.editStack.aspectPreset == preset,
                             onClick = {
                                 cropEditorActive = true
-                                viewModel.setAspectPreset(preset)
+                                onSetAspectPreset(preset)
                             },
                             label = { Text(preset.label) },
                             modifier = Modifier.testTag("aspect_preset_${preset.name}"),
@@ -325,7 +377,7 @@ fun CartEditScreen(
                                         right = ((rect.right - whole.left).toFloat() / whole.width()).coerceIn(0f, 1f),
                                         bottom = ((rect.bottom - whole.top).toFloat() / whole.height()).coerceIn(0f, 1f),
                                     )
-                                    viewModel.applyCrop(norm)
+                                    onApplyCrop(norm)
                                 }
                                 cropEditorActive = false
                             },
@@ -337,7 +389,7 @@ fun CartEditScreen(
                         }
                     } else {
                         FilledTonalButton(
-                            onClick = viewModel::toggleBackgroundRemoval,
+                            onClick = onToggleBackgroundRemoval,
                             enabled = !uiState.isProcessingImage,
                             modifier = Modifier
                                 .weight(1f)
@@ -350,7 +402,7 @@ fun CartEditScreen(
                     }
 
                     OutlinedButton(
-                        onClick = viewModel::rotate90Degrees,
+                        onClick = onRotate90Degrees,
                         enabled = !uiState.isProcessingImage,
                     ) {
                         Icon(Icons.Rounded.RotateRight, contentDescription = "Rotate 90°", modifier = Modifier.size(18.dp))
@@ -358,7 +410,7 @@ fun CartEditScreen(
                     OutlinedButton(
                         onClick = {
                             cropEditorActive = false
-                            viewModel.resetToOriginal()
+                            onResetToOriginal()
                         },
                         enabled = !uiState.isProcessingImage,
                     ) {
@@ -378,7 +430,6 @@ fun CartEditScreen(
             }
         }
 
-        // Metadata OCR & Swatch Detection Form
         Card(
             shape = MaterialTheme.shapes.large,
             modifier = Modifier.fillMaxWidth(),
@@ -398,7 +449,7 @@ fun CartEditScreen(
                         fontWeight = FontWeight.Bold,
                     )
                     FilledTonalButton(
-                        onClick = viewModel::analyzeCurrentImage,
+                        onClick = onAnalyzeCurrentImage,
                         enabled = !uiState.isProcessingImage,
                         modifier = Modifier.testTag("analyze_card_button"),
                     ) {
@@ -410,7 +461,7 @@ fun CartEditScreen(
 
                 OutlinedTextField(
                     value = uiState.fabricName,
-                    onValueChange = viewModel::onFabricNameChanged,
+                    onValueChange = onFabricNameChanged,
                     label = { Text("Fabric Name") },
                     placeholder = { Text("e.g. Silk 180") },
                     singleLine = true,
@@ -421,7 +472,7 @@ fun CartEditScreen(
 
                 OutlinedTextField(
                     value = uiState.fabricCode,
-                    onValueChange = viewModel::onFabricCodeChanged,
+                    onValueChange = onFabricCodeChanged,
                     label = { Text("Fabric Code") },
                     placeholder = { Text("e.g. SLK-180") },
                     singleLine = true,
@@ -436,7 +487,7 @@ fun CartEditScreen(
                 ) {
                     OutlinedTextField(
                         value = uiState.weightGsmText,
-                        onValueChange = viewModel::onWeightGsmChanged,
+                        onValueChange = onWeightGsmChanged,
                         label = { Text("Weight (GSM / g/m²)") },
                         placeholder = { Text("180") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -447,7 +498,7 @@ fun CartEditScreen(
                     )
                     OutlinedTextField(
                         value = uiState.widthCmText,
-                        onValueChange = viewModel::onWidthCmChanged,
+                        onValueChange = onWidthCmChanged,
                         label = { Text("Width (cm)") },
                         placeholder = { Text("150") },
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -494,7 +545,7 @@ fun CartEditScreen(
                                 )
                                 OutlinedTextField(
                                     value = sw.swatchNumber,
-                                    onValueChange = { viewModel.onSwatchNumberEdited(sw.id, it) },
+                                    onValueChange = { onSwatchNumberEdited(sw.id, it) },
                                     label = { Text("#") },
                                     singleLine = true,
                                     modifier = Modifier.width(88.dp),
@@ -519,7 +570,7 @@ fun CartEditScreen(
         }
 
         Button(
-            onClick = { viewModel.saveShadeCart(onSavedNavigateToCart) },
+            onClick = onSaveShadeCart,
             enabled = !uiState.isSaving && !uiState.isProcessingImage,
             modifier = Modifier
                 .fillMaxWidth()
@@ -536,5 +587,46 @@ fun CartEditScreen(
                 Text("Save Shade Cart")
             }
         }
+    }
+}
+
+@Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun CartEditScreenPreview() {
+    AlAzharTexTheme(preferences = ThemeSettings(useDynamicColor = false)) {
+        CartEditScreen(
+            uiState = CartEditUiState(
+                fabricName = "Silk 180",
+                fabricCode = "SLK-180",
+                weightGsmText = "180",
+                widthCmText = "150",
+                detectedSwatches = listOf(
+                    DetectedSwatchEditable(
+                        id = "1",
+                        swatchNumber = "5",
+                        colorHex = "#102A71",
+                        colorName = "Azhar Navy",
+                        bboxLeft = 0f,
+                        bboxTop = 0f,
+                        bboxRight = 1f,
+                        bboxBottom = 1f,
+                    ),
+                ),
+            ),
+            onDownloadSegmentationModel = {},
+            onSetAspectPreset = {},
+            onApplyCrop = {},
+            onToggleBackgroundRemoval = {},
+            onRotate90Degrees = {},
+            onResetToOriginal = {},
+            onAnalyzeCurrentImage = {},
+            onFabricNameChanged = {},
+            onFabricCodeChanged = {},
+            onWeightGsmChanged = {},
+            onWidthCmChanged = {},
+            onSwatchNumberEdited = { _, _ -> },
+            onSaveShadeCart = {},
+        )
     }
 }

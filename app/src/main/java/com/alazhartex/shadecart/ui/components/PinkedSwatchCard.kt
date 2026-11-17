@@ -1,7 +1,7 @@
 package com.alazhartex.shadecart.ui.components
 
+import android.content.res.Configuration
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,33 +36,37 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.alazhartex.shadecart.data.local.Roll
-import com.alazhartex.shadecart.data.local.SwatchWithRoll
+import com.alazhartex.shadecart.domain.model.RollStockStatus
+import com.alazhartex.shadecart.domain.model.SwatchModel
+import com.alazhartex.shadecart.domain.model.ThemeSettings
+import com.alazhartex.shadecart.domain.model.WarehouseRollModel
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
+import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
 import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Displays a fabric color chip modeled after Al AzharTex physical shade-card swatches:
- * zigzag/pinked scissors perimeter, prominent swatch number badge, HEX code, and clickable
- * Roll inventory record link.
+ * Stateless Compose card displaying a fabric color swatch modeled after Al AzharTex physical
+ * shade-card cuts: pinked zigzag perimeter, swatch badge, validated HEX label, and clickable
+ * warehouse roll inventory chip
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2, 4.4, & 5.2).
  */
 @Composable
 fun PinkedSwatchCard(
-    item: SwatchWithRoll,
-    onRollClick: (SwatchWithRoll) -> Unit,
+    item: SwatchModel,
+    onRollClick: (SwatchModel) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val swatch = item.swatch
-    val roll: Roll? = item.roll
-    val argb = HexColorValidator.parseArgbOrNull(swatch.colorHex) ?: 0xFF334155.toInt()
+    val roll: WarehouseRollModel? = item.linkedRoll
+    val argb = HexColorValidator.parseArgbOrNull(item.colorHex) ?: 0xFF334155.toInt()
     val swatchColor = Color(argb)
 
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .testTag("swatch_chip_${swatch.swatchNumber}"),
+            .testTag("swatch_chip_${item.swatchNumber}"),
         shape = MaterialTheme.shapes.medium,
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surface,
@@ -73,7 +77,7 @@ fun PinkedSwatchCard(
             Box(modifier = Modifier.fillMaxWidth()) {
                 PinkedFabricCut(
                     fillColor = swatchColor,
-                    contentDescription = "Swatch #${swatch.swatchNumber} ${swatch.colorHex}",
+                    contentDescription = "Swatch #${item.swatchNumber} ${item.colorHex}",
                     modifier = Modifier.fillMaxWidth(),
                 )
                 Surface(
@@ -85,7 +89,7 @@ fun PinkedSwatchCard(
                         .padding(6.dp),
                 ) {
                     Text(
-                        text = "#${swatch.swatchNumber}",
+                        text = "#${item.swatchNumber}",
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.Bold,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
@@ -101,7 +105,7 @@ fun PinkedSwatchCard(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    text = swatch.colorName.ifBlank { "Shade #${swatch.swatchNumber}" },
+                    text = item.colorName.ifBlank { "Shade #${item.swatchNumber}" },
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     maxLines = 1,
@@ -110,7 +114,7 @@ fun PinkedSwatchCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = swatch.colorHex.uppercase(),
+                    text = item.colorHex.uppercase(),
                     style = MaterialTheme.typography.labelMedium,
                     fontFamily = FontFamily.Monospace,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -123,8 +127,7 @@ fun PinkedSwatchCard(
                 onClick = { onRollClick(item) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onRollClick(item) }
-                    .testTag("roll_link_${swatch.swatchNumber}"),
+                    .testTag("roll_link_${item.swatchNumber}"),
                 leadingIcon = {
                     Icon(
                         imageVector = if (roll != null) Icons.Rounded.Inventory2 else Icons.Rounded.LinkOff,
@@ -149,6 +152,9 @@ fun PinkedSwatchCard(
     }
 }
 
+/**
+ * Custom Canvas composable rendering a pinked-scissors fabric border around [fillColor].
+ */
 @Composable
 fun PinkedFabricCut(
     fillColor: Color,
@@ -220,4 +226,37 @@ private fun buildPinkedPath(width: Float, height: Float, amp: Float, tooth: Floa
 
     p.close()
     return p
+}
+
+@Preview(showBackground = true)
+@Preview(showBackground = true, uiMode = Configuration.UI_MODE_NIGHT_YES)
+@Composable
+private fun PinkedSwatchCardPreview() {
+    AlAzharTexTheme(preferences = ThemeSettings(useDynamicColor = false)) {
+        PinkedSwatchCard(
+            item = SwatchModel(
+                id = "sw-5",
+                shadeCartId = "cart-1",
+                fabricTypeId = "fab-silk-180",
+                rollId = "roll-slk-5",
+                linkedRoll = WarehouseRollModel(
+                    id = "roll-slk-5",
+                    rollCode = "RL-SLK-005",
+                    fabricTypeId = "fab-silk-180",
+                    shadeLabel = "5",
+                    colorName = "Azhar Navy",
+                    colorHex = "#102A71",
+                    warehouseShed = "wh-alwa",
+                    lengthMeters = 480.0,
+                    status = RollStockStatus.IN_STOCK,
+                ),
+                swatchNumber = "5",
+                colorHex = "#102A71",
+                colorName = "Azhar Navy",
+                positionOrder = 0,
+            ),
+            onRollClick = {},
+            modifier = Modifier.padding(16.dp),
+        )
+    }
 }

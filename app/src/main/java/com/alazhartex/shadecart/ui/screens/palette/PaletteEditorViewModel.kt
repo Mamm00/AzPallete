@@ -3,12 +3,16 @@ package com.alazhartex.shadecart.ui.screens.palette
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.alazhartex.shadecart.data.local.Roll
-import com.alazhartex.shadecart.data.repo.SaveResult
-import com.alazhartex.shadecart.data.repo.ShadeCartDraft
-import com.alazhartex.shadecart.data.repo.ShadeCartRepository
-import com.alazhartex.shadecart.data.repo.SwatchDraft
 import com.alazhartex.shadecart.domain.imaging.PinkedSwatchSampler
+import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
+import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
+import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.WarehouseRollModel
+import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartByIdUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartsUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveWarehouseRollsUseCase
+import com.alazhartex.shadecart.domain.usecase.UpdateShadeCartSwatchesUseCase
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,14 +24,17 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
+/**
+ * Immutable presentation state for manual swatch HEX color validation, live preview, reordering,
+ * and warehouse roll linking (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3).
+ */
 data class PaletteEditorUiState(
     val cartId: String? = null,
     val cartTitle: String = "Manual Palette Editor",
     val expectedVersion: Long = 1L,
     val fabricTypeId: String = "fab-silk-180",
-    val swatches: List<SwatchDraft> = emptyList(),
-    val availableRolls: List<Roll> = emptyList(),
-    // Active swatch color editor state (used for both Add and Override)
+    val swatches: List<SwatchInput> = emptyList(),
+    val availableRolls: List<WarehouseRollModel> = emptyList(),
     val editingSwatchId: String? = null,
     val swatchNumberInput: String = "",
     val colorNameInput: String = "",
@@ -40,10 +47,19 @@ data class PaletteEditorUiState(
     val statusMessage: String? = null,
 )
 
+/**
+ * `@HiltViewModel` backing [PaletteEditorRoute], relying solely on pure Kotlin domain UseCases and
+ * [HexColorValidator] for deterministic HEX validation and optimistic-locked saves
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2, 6.3, & 10.1).
+ */
 @HiltViewModel
 class PaletteEditorViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
-    private val repository: ShadeCartRepository,
+    private val observeShadeCarts: ObserveShadeCartsUseCase,
+    private val observeShadeCartById: ObserveShadeCartByIdUseCase,
+    private val observeWarehouseRolls: ObserveWarehouseRollsUseCase,
+    private val createOrGetShadeCart: CreateOrGetShadeCartUseCase,
+    private val updateShadeCartSwatches: UpdateShadeCartSwatchesUseCase,
 ) : ViewModel() {
 
     companion object {
@@ -61,14 +77,14 @@ class PaletteEditorViewModel @Inject constructor(
 
     private fun loadInitialCart() {
         viewModelScope.launch {
-            val rolls = repository.observeRolls().first()
+            val rolls = observeWarehouseRolls(null).first()
             val requestedId = savedStateHandle.get<String>(KEY_CART_ID)
-            val allCarts = repository.observeCarts().first()
-            var targetCart = allCarts.firstOrNull { it.cart.id == requestedId } ?: allCarts.firstOrNull()
+            val allCarts = observeShadeCarts().first()
+            var targetCart = allCarts.firstOrNull { it.id == requestedId } ?: allCarts.firstOrNull()
 
             if (targetCart == null) {
-                val created = repository.createOrGetDraftCart(
-                    ShadeCartDraft(
+                val created = createOrGetShadeCart(
+                    ShadeCartCreateInput(
                         fabricTypeId = "fab-silk-180",
                         fabricName = "Silk 180",
                         fabricCode = "SLK-180",
@@ -77,16 +93,15 @@ class PaletteEditorViewModel @Inject constructor(
                         swatches = emptyList(),
                     ),
                 )
-                if (created is SaveResult.Success) {
+                if (created is ShadeCartSaveOutcome.Saved) {
                     savedStateHandle[KEY_CART_ID] = created.cartId
-                    targetCart = repository.observeCart(created.cartId).first()
+                    targetCart = observeShadeCartById(created.cartId).first()
                 }
             }
 
             if (targetCart != null) {
-                val swatchDrafts = targetCart.swatches.map { entry ->
-                    val sw = entry.swatch
-                    SwatchDraft(
+                val swatchInputs = targetCart.swatches.map { sw ->
+                    SwatchInput(
                         id = sw.id,
                         fabricTypeId = sw.fabricTypeId,
                         rollId = sw.rollId,
@@ -105,15 +120,15 @@ class PaletteEditorViewModel @Inject constructor(
 
                 val savedHex = savedStateHandle.get<String>(KEY_HEX_INPUT) ?: "#102A71"
                 val savedNum = savedStateHandle.get<String>(KEY_SWATCH_NUM)
-                    ?: nextSwatchNumber(swatchDrafts)
+                    ?: nextSwatchNumber(swatchInputs)
 
                 _uiState.update {
                     it.copy(
-                        cartId = targetCart.cart.id,
-                        cartTitle = "${targetCart.cart.fabricName} (${targetCart.cart.fabricCode})",
-                        expectedVersion = targetCart.cart.version,
-                        fabricTypeId = targetCart.cart.fabricTypeId ?: "fab-silk-180",
-                        swatches = swatchDrafts,
+                        cartId = targetCart.id,
+                        cartTitle = "${targetCart.fabricName} (${targetCart.fabricCode})",
+                        expectedVersion = targetCart.version,
+                        fabricTypeId = targetCart.fabricTypeId ?: "fab-silk-180",
+                        swatches = swatchInputs,
                         availableRolls = rolls,
                         swatchNumberInput = savedNum,
                     )
@@ -123,7 +138,7 @@ class PaletteEditorViewModel @Inject constructor(
         }
     }
 
-    fun startEditingSwatch(swatch: SwatchDraft) {
+    fun startEditingSwatch(swatch: SwatchInput) {
         _uiState.update {
             it.copy(
                 editingSwatchId = swatch.id,
@@ -225,7 +240,7 @@ class PaletteEditorViewModel @Inject constructor(
             }
         } else {
             currentList.add(
-                SwatchDraft(
+                SwatchInput(
                     id = UUID.randomUUID().toString(),
                     fabricTypeId = state.fabricTypeId,
                     rollId = state.selectedRollId,
@@ -280,13 +295,13 @@ class PaletteEditorViewModel @Inject constructor(
         viewModelScope.launch {
             _uiState.update { it.copy(isSaving = true) }
             when (
-                val res = repository.updateSwatchesWithOptimisticLock(
+                val res = updateShadeCartSwatches(
                     cartId = cartId,
                     expectedCartVersion = state.expectedVersion,
                     swatches = state.swatches,
                 )
             ) {
-                is SaveResult.Success -> {
+                is ShadeCartSaveOutcome.Saved -> {
                     _uiState.update {
                         it.copy(
                             isSaving = false,
@@ -297,7 +312,7 @@ class PaletteEditorViewModel @Inject constructor(
                     onSaved(cartId)
                 }
 
-                is SaveResult.Conflict -> {
+                is ShadeCartSaveOutcome.Conflict -> {
                     _uiState.update {
                         it.copy(
                             isSaving = false,
@@ -307,7 +322,7 @@ class PaletteEditorViewModel @Inject constructor(
                     onSaved(cartId)
                 }
 
-                is SaveResult.NotFound -> {
+                is ShadeCartSaveOutcome.NotFound -> {
                     _uiState.update {
                         it.copy(
                             isSaving = false,
@@ -319,7 +334,7 @@ class PaletteEditorViewModel @Inject constructor(
         }
     }
 
-    private fun nextSwatchNumber(swatches: List<SwatchDraft>): String {
+    private fun nextSwatchNumber(swatches: List<SwatchInput>): String {
         val maxExisting = swatches.mapNotNull { it.swatchNumber.toIntOrNull() }.maxOrNull() ?: 0
         return (maxExisting + 1).toString()
     }

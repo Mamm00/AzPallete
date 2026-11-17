@@ -43,25 +43,30 @@ import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.alazhartex.shadecart.R
-import com.alazhartex.shadecart.data.local.SyncQueueEntity
-import com.alazhartex.shadecart.data.prefs.AccentPaletteId
-import com.alazhartex.shadecart.data.prefs.ThemeMode
-import com.alazhartex.shadecart.data.prefs.ThemePreferences
-import com.alazhartex.shadecart.data.prefs.ThemePreferencesRepository
-import com.alazhartex.shadecart.data.repo.ConflictResolution
-import com.alazhartex.shadecart.data.repo.ShadeCartRepository
-import com.alazhartex.shadecart.data.repo.SyncConflict
-import com.alazhartex.shadecart.data.sync.ShadeCartSyncAdapter
-import com.alazhartex.shadecart.data.sync.StubShadeCartSyncAdapter
+import com.alazhartex.shadecart.domain.model.AccentPaletteSetting
+import com.alazhartex.shadecart.domain.model.ConflictDecision
+import com.alazhartex.shadecart.domain.model.SyncConflictModel
+import com.alazhartex.shadecart.domain.model.SyncQueueEntryModel
+import com.alazhartex.shadecart.domain.model.ThemeModeSetting
+import com.alazhartex.shadecart.domain.model.ThemeSettings
+import com.alazhartex.shadecart.domain.repository.SyncDebugController
+import com.alazhartex.shadecart.domain.usecase.ObserveSyncConflictsUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveSyncQueueUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveThemePreferencesUseCase
+import com.alazhartex.shadecart.domain.usecase.ResolveSyncConflictUseCase
+import com.alazhartex.shadecart.domain.usecase.TriggerSyncUseCase
+import com.alazhartex.shadecart.domain.usecase.UpdateAccentPaletteUseCase
+import com.alazhartex.shadecart.domain.usecase.UpdateDynamicColorUseCase
+import com.alazhartex.shadecart.domain.usecase.UpdateThemeModeUseCase
 import com.alazhartex.shadecart.ui.components.BrandLogoBadge
 import com.alazhartex.shadecart.ui.components.ConflictBanner
 import com.alazhartex.shadecart.ui.components.ThemeAndSyncSettingsSheet
 import com.alazhartex.shadecart.ui.navigation.NavRoutes
 import com.alazhartex.shadecart.ui.screens.capture.CameraPermissionStatus
-import com.alazhartex.shadecart.ui.screens.capture.CartCaptureScreen
-import com.alazhartex.shadecart.ui.screens.edit.CartEditScreen
-import com.alazhartex.shadecart.ui.screens.palette.PaletteEditorScreen
-import com.alazhartex.shadecart.ui.screens.shadecard.DigitalShadeCardScreen
+import com.alazhartex.shadecart.ui.screens.capture.CartCaptureRoute
+import com.alazhartex.shadecart.ui.screens.edit.CartEditRoute
+import com.alazhartex.shadecart.ui.screens.palette.PaletteEditorRoute
+import com.alazhartex.shadecart.ui.screens.shadecard.DigitalShadeCardRoute
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -70,23 +75,38 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Immutable shell UI state combining DataStore theme preferences, unresolved conflicts,
+ * and offline sync queue diagnostics (Pyre, Chapter 6.3 & Chapter 10.1).
+ */
 data class AppShellState(
-    val themePreferences: ThemePreferences = ThemePreferences(),
-    val conflicts: List<SyncConflict> = emptyList(),
-    val syncQueue: List<SyncQueueEntity> = emptyList(),
+    val themePreferences: ThemeSettings = ThemeSettings(),
+    val conflicts: List<SyncConflictModel> = emptyList(),
+    val syncQueue: List<SyncQueueEntryModel> = emptyList(),
 )
 
+/**
+ * Application-shell `@HiltViewModel` delegating exclusively to domain UseCases and
+ * [SyncDebugController], exposing a single reactive [StateFlow] via `stateIn(WhileSubscribed)`
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3, 7.1, & 10.1).
+ */
 @HiltViewModel
 class AppShellViewModel @Inject constructor(
-    private val themePrefs: ThemePreferencesRepository,
-    private val repository: ShadeCartRepository,
-    private val syncAdapter: ShadeCartSyncAdapter,
+    observeThemePreferences: ObserveThemePreferencesUseCase,
+    observeSyncConflicts: ObserveSyncConflictsUseCase,
+    observeSyncQueue: ObserveSyncQueueUseCase,
+    private val updateThemeMode: UpdateThemeModeUseCase,
+    private val updateDynamicColor: UpdateDynamicColorUseCase,
+    private val updateAccentPalette: UpdateAccentPaletteUseCase,
+    private val resolveSyncConflict: ResolveSyncConflictUseCase,
+    private val triggerSync: TriggerSyncUseCase,
+    private val syncDebugController: SyncDebugController,
 ) : ViewModel() {
 
     val shellState: StateFlow<AppShellState> = combine(
-        themePrefs.preferences,
-        repository.observeConflicts(),
-        repository.observeSyncQueue(),
+        observeThemePreferences(),
+        observeSyncConflicts(),
+        observeSyncQueue(),
     ) { prefs, conflicts, queue ->
         AppShellState(
             themePreferences = prefs,
@@ -99,38 +119,42 @@ class AppShellViewModel @Inject constructor(
         initialValue = AppShellState(),
     )
 
-    fun setThemeMode(mode: ThemeMode) {
-        viewModelScope.launch { themePrefs.setThemeMode(mode) }
+    fun setThemeMode(mode: ThemeModeSetting) {
+        viewModelScope.launch { updateThemeMode(mode) }
     }
 
     fun setDynamicColor(enabled: Boolean) {
-        viewModelScope.launch { themePrefs.setUseDynamicColor(enabled) }
+        viewModelScope.launch { updateDynamicColor(enabled) }
     }
 
-    fun setAccentPalette(palette: AccentPaletteId) {
-        viewModelScope.launch { themePrefs.setAccentPalette(palette) }
+    fun setAccentPalette(palette: AccentPaletteSetting) {
+        viewModelScope.launch { updateAccentPalette(palette) }
     }
 
-    fun resolveConflict(cartId: String, resolution: ConflictResolution) {
+    fun resolveConflict(cartId: String, decision: ConflictDecision) {
         viewModelScope.launch {
-            repository.resolveConflict(cartId, resolution)
+            resolveSyncConflict(cartId, decision)
         }
     }
 
     fun syncNow() {
         viewModelScope.launch {
-            repository.syncPendingQueue()
+            triggerSync()
         }
     }
 
     fun armSimulatedConflict() {
-        (syncAdapter as? StubShadeCartSyncAdapter)?.armSimulatedConflict()
+        syncDebugController.armSimulatedConflict()
     }
 
-    fun isConflictArmed(): Boolean =
-        (syncAdapter as? StubShadeCartSyncAdapter)?.isConflictArmed() == true
+    fun isConflictArmed(): Boolean = syncDebugController.isConflictArmed()
 }
 
+/**
+ * Top-level Material 3 Scaffold and Compose Navigation container (`rememberNavController` +
+ * `NavHost`). Navigation controller stays strictly inside UI composables, never inside ViewModels
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 5.3 & Chapter 6.4).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AlAzharTexShadeCartApp(
@@ -156,7 +180,7 @@ fun AlAzharTexShadeCartApp(
                 withDismissAction = true,
             )
             if (result == SnackbarResult.ActionPerformed) {
-                shellViewModel.resolveConflict(activeConflict.cartId, ConflictResolution.KEEP_LOCAL)
+                shellViewModel.resolveConflict(activeConflict.cartId, ConflictDecision.KEEP_LOCAL)
             }
         }
     }
@@ -258,7 +282,7 @@ fun AlAzharTexShadeCartApp(
                         },
                     ),
                 ) {
-                    DigitalShadeCardScreen(
+                    DigitalShadeCardRoute(
                         onOpenCapture = {
                             navController.navigate(NavRoutes.CART_CAPTURE) { launchSingleTop = true }
                         },
@@ -272,7 +296,7 @@ fun AlAzharTexShadeCartApp(
                 }
 
                 composable(route = NavRoutes.CART_CAPTURE) {
-                    CartCaptureScreen(
+                    CartCaptureRoute(
                         permissionStatusOverride = cameraPermissionStatusOverride,
                         onOpenSettingsOverride = onOpenSettingsOverride,
                         onImageReadyForEdit = { imagePath ->
@@ -296,7 +320,7 @@ fun AlAzharTexShadeCartApp(
                         },
                     ),
                 ) {
-                    CartEditScreen(
+                    CartEditRoute(
                         onSavedNavigateToCart = { savedCartId ->
                             navController.navigate(NavRoutes.digitalShadeCard(savedCartId)) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -318,7 +342,7 @@ fun AlAzharTexShadeCartApp(
                         },
                     ),
                 ) {
-                    PaletteEditorScreen(
+                    PaletteEditorRoute(
                         onSavedNavigateToCart = { savedCartId ->
                             navController.navigate(NavRoutes.digitalShadeCard(savedCartId)) {
                                 popUpTo(navController.graph.findStartDestination().id) {
@@ -345,7 +369,7 @@ fun AlAzharTexShadeCartApp(
             onSyncNow = {
                 shellViewModel.syncNow()
                 scope.launch {
-                    snackbarHostState.showSnackbar("Sync triggered via WorkManager / SyncAdapter stub.")
+                    snackbarHostState.showSnackbar("Sync triggered via WorkManager / Retrofit SyncAdapter.")
                 }
             },
             onArmSimulatedConflict = {

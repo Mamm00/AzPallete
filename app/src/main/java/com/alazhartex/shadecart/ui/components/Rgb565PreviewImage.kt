@@ -15,16 +15,16 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
-import com.alazhartex.shadecart.domain.imaging.BitmapProcessor
 
 /**
- * Loads an `RGB_565` downsampled preview bitmap off the main thread without keeping bitmaps
- * inside ViewModel state.
+ * Loads an `RGB_565` downsampled preview bitmap asynchronously off the main thread via
+ * [produceState], keeping stateless screen composables free of `BitmapProcessor` / ViewModel
+ * dependencies and keeping bitmaps out of `StateFlow` (Pyre, Chapter 1.2, 6.2, & 11.1).
  */
 @Composable
 fun Rgb565PreviewImage(
     imagePath: String?,
-    bitmapProcessor: BitmapProcessor,
+    loadBitmap: suspend (String) -> Bitmap?,
     contentDescription: String,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Fit,
@@ -33,7 +33,7 @@ fun Rgb565PreviewImage(
         value = if (imagePath.isNullOrBlank()) {
             null
         } else {
-            bitmapProcessor.loadRgb565Preview(imagePath)
+            loadBitmap(imagePath)
         }
     }
 
