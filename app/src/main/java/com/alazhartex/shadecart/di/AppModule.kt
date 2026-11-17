@@ -24,14 +24,27 @@ import kotlinx.serialization.json.Json
 import javax.inject.Qualifier
 import javax.inject.Singleton
 
+/**
+ * Coroutine dispatcher qualifier for blocking disk, database, and network I/O
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 3.5 & Chapter 10.2).
+ */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class IoDispatcher
 
+/**
+ * Coroutine dispatcher qualifier for CPU-bound pixel sampling and bitmap analysis
+ * (Pyre, Chapter 3.5).
+ */
 @Qualifier
 @Retention(AnnotationRetention.BINARY)
 annotation class DefaultDispatcher
 
+/**
+ * Application-wide Hilt DI module supplying coroutine dispatchers, JSON serialization,
+ * image-processing pipelines, ML Kit gateways, and [ShadeCartRepository]
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 7.1 & Chapter 10.2).
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {

@@ -10,8 +10,8 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.alazhartex.shadecart.data.repo.ShadeCartRepository
 import com.alazhartex.shadecart.data.repo.SyncWorkScheduler
+import com.alazhartex.shadecart.domain.usecase.TriggerSyncUseCase
 import dagger.assisted.Assisted
 import dagger.assisted.AssistedInject
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -19,16 +19,22 @@ import java.util.concurrent.TimeUnit
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/**
+ * Background Hilt WorkManager worker draining queued shade-cart updates via [TriggerSyncUseCase].
+ *
+ * Uses connected-network constraints and exponential backoff retry on transient HTTP/network failures
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 8.2 & Chapter 10.1).
+ */
 @HiltWorker
 class SyncWorker @AssistedInject constructor(
     @Assisted appContext: Context,
     @Assisted workerParams: WorkerParameters,
-    private val repository: ShadeCartRepository,
+    private val triggerSyncUseCase: TriggerSyncUseCase,
 ) : CoroutineWorker(appContext, workerParams) {
 
     override suspend fun doWork(): Result {
-        val report = repository.syncPendingQueue()
-        return if (report.failed > 0 && runAttemptCount < MAX_RETRIES) {
+        val summary = triggerSyncUseCase()
+        return if (summary.failed > 0 && runAttemptCount < MAX_RETRIES) {
             Result.retry()
         } else {
             Result.success()
@@ -41,6 +47,9 @@ class SyncWorker @AssistedInject constructor(
     }
 }
 
+/**
+ * Enqueues unique WorkManager sync tasks whenever local shade cart mutations are committed.
+ */
 @Singleton
 class WorkManagerSyncScheduler @Inject constructor(
     @ApplicationContext private val context: Context,

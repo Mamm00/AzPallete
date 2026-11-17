@@ -1,7 +1,13 @@
 package com.alazhartex.shadecart.data.repo
 
+import com.alazhartex.shadecart.domain.model.ConflictOrigin
 import kotlinx.serialization.Serializable
 
+/**
+ * Serializable swatch draft payload persisted inside Room's `sync_queue` JSON column and
+ * exchanged with [com.alazhartex.shadecart.data.sync.ShadeCartSyncAdapter]
+ * (Pyre, Chapter 10.1 & Chapter 10.3).
+ */
 @Serializable
 data class SwatchDraft(
     val id: String,
@@ -19,6 +25,10 @@ data class SwatchDraft(
     val version: Long = 1L,
 )
 
+/**
+ * Serializable full shade-cart snapshot stored in offline sync queue records and transmitted
+ * during optimistic-locking sync operations (Pyre, Chapter 10.3).
+ */
 @Serializable
 data class ShadeCartSnapshot(
     val id: String,
@@ -36,44 +46,16 @@ data class ShadeCartSnapshot(
     val updatedAt: Long,
 )
 
-enum class ConflictSource {
-    CONCURRENT_LOCAL_WRITE,
-    REMOTE_SYNC_VERSION_MISMATCH,
-}
-
-enum class ConflictResolution {
-    KEEP_LOCAL,
-    KEEP_REMOTE,
-}
-
-data class SyncConflict(
+/**
+ * Internal persistence record pairing conflicting local and remote [ShadeCartSnapshot] payloads
+ * stored inside `sync_queue` until resolved by the operator.
+ */
+data class SyncConflictRecord(
     val cartId: String,
     val fabricName: String,
     val fabricCode: String,
     val localSnapshot: ShadeCartSnapshot,
     val remoteSnapshot: ShadeCartSnapshot,
-    val source: ConflictSource,
+    val source: ConflictOrigin,
     val detectedAt: Long,
-)
-
-sealed interface SaveResult {
-    data class Success(
-        val cartId: String,
-        val newVersion: Long,
-    ) : SaveResult
-
-    data class Conflict(
-        val conflict: SyncConflict,
-    ) : SaveResult
-
-    data class NotFound(
-        val cartId: String,
-    ) : SaveResult
-}
-
-data class SyncBatchReport(
-    val processed: Int,
-    val synced: Int,
-    val conflicts: Int,
-    val failed: Int,
 )

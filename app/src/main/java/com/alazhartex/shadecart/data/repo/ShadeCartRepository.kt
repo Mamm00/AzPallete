@@ -1,14 +1,24 @@
 package com.alazhartex.shadecart.data.repo
 
 import com.alazhartex.shadecart.data.local.FabricType
-import com.alazhartex.shadecart.data.local.Roll
 import com.alazhartex.shadecart.data.local.ShadeCartEntity
-import com.alazhartex.shadecart.data.local.ShadeCartWithDetails
 import com.alazhartex.shadecart.data.local.SwatchEntity
 import com.alazhartex.shadecart.data.local.SyncQueueEntity
 import com.alazhartex.shadecart.data.local.SyncStatus
 import com.alazhartex.shadecart.data.sync.ShadeCartSyncAdapter
 import com.alazhartex.shadecart.data.sync.SyncPushResult
+import com.alazhartex.shadecart.domain.model.ConflictDecision
+import com.alazhartex.shadecart.domain.model.ConflictOrigin
+import com.alazhartex.shadecart.domain.model.FabricTypeModel
+import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
+import com.alazhartex.shadecart.domain.model.ShadeCartModel
+import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
+import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.SyncBatchSummary
+import com.alazhartex.shadecart.domain.model.SyncConflictModel
+import com.alazhartex.shadecart.domain.model.SyncQueueEntryModel
+import com.alazhartex.shadecart.domain.model.WarehouseRollModel
+import com.alazhartex.shadecart.domain.repository.ShadeCartRepositoryContract
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -20,30 +30,21 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
+/**
+ * Coordinates WorkManager background sync scheduling from the data layer without coupling the
+ * repository directly to Android [androidx.work.WorkManager] APIs (Pyre, Chapter 10.1).
+ */
 interface SyncWorkScheduler {
     fun enqueueSync()
 }
 
-data class ShadeCartDraft(
-    val id: String = UUID.randomUUID().toString(),
-    val fabricTypeId: String? = null,
-    val fabricName: String,
-    val fabricCode: String,
-    val weightGsm: Int,
-    val widthCm: Int,
-    val originalImagePath: String? = null,
-    val editedImagePath: String? = null,
-    val editStackJson: String = "{}",
-    val headerOcrRaw: String = "",
-    val swatches: List<SwatchDraft> = emptyList(),
-)
-
 /**
- * Coordinates persistence, sync queue management, optimistic locking (`version`), and
- * conflict resolution for Digital Shade Carts.
+ * Offline-first repository implementing [ShadeCartRepositoryContract] over [ShadeCartStore]
+ * (Room) and [ShadeCartSyncAdapter] (Retrofit + OkHttp + offline stub fallback).
  *
- * Every mutation executes off the main thread on [ioDispatcher], serialized via [writeMutex]
- * AND wrapped inside [ShadeCartStore.runInTransaction] (`RoomDatabase.withTransaction`).
+ * Maps storage entities to pure Kotlin domain models at the repository boundary while executing all
+ * writes off the main thread on [ioDispatcher], serialized via [writeMutex] inside Room database
+ * transactions (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2, 10.1, & 10.3).
  */
 class ShadeCartRepository(
     private val store: ShadeCartStore,
@@ -52,34 +53,36 @@ class ShadeCartRepository(
     private val json: Json = Json { ignoreUnknownKeys = true; encodeDefaults = true },
     private val ioDispatcher: CoroutineDispatcher = Dispatchers.IO,
     private val nowProvider: () -> Long = { System.currentTimeMillis() },
-) {
+) : ShadeCartRepositoryContract {
+
     private val writeMutex = Mutex()
 
-    fun observeCarts(): Flow<List<ShadeCartWithDetails>> =
+    override fun observeCarts(): Flow<List<ShadeCartModel>> =
         store.observeCartsWithDetails().map { carts ->
-            carts.map { details ->
-                details.copy(swatches = details.swatches.sortedBy { it.swatch.positionOrder })
-            }
+            carts.map { it.toDomain() }
         }
 
-    fun observeCart(cartId: String): Flow<ShadeCartWithDetails?> =
-        store.observeCartWithDetails(cartId).map { details ->
-            details?.copy(swatches = details.swatches.sortedBy { it.swatch.positionOrder })
-        }
+    override fun observeCart(cartId: String): Flow<ShadeCartModel?> =
+        store.observeCartWithDetails(cartId).map { it?.toDomain() }
 
-    fun observeFabricTypes(): Flow<List<FabricType>> = store.observeFabricTypes()
+    override fun observeFabricTypes(): Flow<List<FabricTypeModel>> =
+        store.observeFabricTypes().map { list -> list.map { it.toDomain() } }
 
-    fun observeRolls(fabricTypeId: String? = null): Flow<List<Roll>> =
-        if (fabricTypeId != null) store.observeRollsForFabric(fabricTypeId) else store.observeRolls()
+    override fun observeRolls(fabricTypeId: String?): Flow<List<WarehouseRollModel>> =
+        (if (fabricTypeId != null) store.observeRollsForFabric(fabricTypeId) else store.observeRolls())
+            .map { list -> list.map { it.toDomain() } }
 
-    fun observeSyncQueue(): Flow<List<SyncQueueEntity>> = store.observeSyncQueue()
+    override fun observeSyncQueue(): Flow<List<SyncQueueEntryModel>> =
+        store.observeSyncQueue().map { list -> list.map { it.toDomain() } }
 
-    fun observeConflicts(): Flow<List<SyncConflict>> =
+    override fun observeConflicts(): Flow<List<SyncConflictModel>> =
         store.observeConflicts().map { rows ->
-            rows.mapNotNull { row -> decodeConflictRow(row) }
+            rows.mapNotNull { row -> decodeConflictRow(row)?.toDomain() }
         }
 
-    suspend fun createOrGetDraftCart(draft: ShadeCartDraft): SaveResult = withContext(ioDispatcher) {
+    override suspend fun createOrGetDraftCart(
+        draft: ShadeCartCreateInput,
+    ): ShadeCartSaveOutcome = withContext(ioDispatcher) {
         writeMutex.withLock {
             store.runInTransaction {
                 val now = nowProvider()
@@ -138,21 +141,21 @@ class ShadeCartRepository(
                     baseVersion = 0L,
                     now = now,
                 )
-                SaveResult.Success(cartId = cartEntity.id, newVersion = cartEntity.version)
+                ShadeCartSaveOutcome.Saved(cartId = cartEntity.id, newVersion = cartEntity.version)
             }
         }.also {
-            if (it is SaveResult.Success) {
+            if (it is ShadeCartSaveOutcome.Saved) {
                 syncScheduler.enqueueSync()
             }
         }
     }
 
     /**
-     * Optimistically locks updates on [expectedVersion].
-     * If another writer updated the entity first, rejects the stale write, persists a conflict
-     * record so the UI banner survives navigation/recreation, and returns [SaveResult.Conflict].
+     * Optimistically locks updates against [expectedVersion].
+     * When another writer commits first, rejects the stale write, persists a conflict entry in
+     * `sync_queue` so conflict alerts survive process death, and returns [ShadeCartSaveOutcome.Conflict].
      */
-    suspend fun saveCartWithOptimisticLock(
+    override suspend fun saveCartWithOptimisticLock(
         cartId: String,
         expectedVersion: Long,
         fabricTypeId: String?,
@@ -164,12 +167,12 @@ class ShadeCartRepository(
         editedImagePath: String?,
         editStackJson: String,
         headerOcrRaw: String,
-        swatches: List<SwatchDraft>,
-    ): SaveResult = withContext(ioDispatcher) {
+        swatches: List<SwatchInput>,
+    ): ShadeCartSaveOutcome = withContext(ioDispatcher) {
         val result = writeMutex.withLock {
             store.runInTransaction {
                 val existing = store.getCart(cartId)
-                    ?: return@runInTransaction SaveResult.NotFound(cartId)
+                    ?: return@runInTransaction ShadeCartSaveOutcome.NotFound(cartId)
                 val existingSwatches = store.getSwatchesForCart(cartId)
                 val now = nowProvider()
 
@@ -194,28 +197,23 @@ class ShadeCartRepository(
                     editStackJson = editStackJson,
                     headerOcrRaw = headerOcrRaw,
                     version = expectedVersion + 1L,
-                    swatches = swatches.mapIndexed { idx, sw ->
-                        sw.copy(
-                            fabricTypeId = resolvedFabric.id,
-                            positionOrder = idx,
-                        )
-                    },
+                    swatches = swatches.mapIndexed { idx, sw -> sw.toDraft(resolvedFabric.id, idx) },
                     updatedAt = now,
                 )
 
                 if (existing.version != expectedVersion) {
                     val currentSnapshot = toSnapshot(existing, existingSwatches)
-                    val conflict = SyncConflict(
+                    val record = SyncConflictRecord(
                         cartId = cartId,
                         fabricName = existing.fabricName,
                         fabricCode = existing.fabricCode,
                         localSnapshot = proposedSnapshot,
                         remoteSnapshot = currentSnapshot,
-                        source = ConflictSource.CONCURRENT_LOCAL_WRITE,
+                        source = ConflictOrigin.CONCURRENT_LOCAL_WRITE,
                         detectedAt = now,
                     )
-                    persistConflictLocked(conflict, now)
-                    return@runInTransaction SaveResult.Conflict(conflict)
+                    persistConflictLocked(record, now)
+                    return@runInTransaction ShadeCartSaveOutcome.Conflict(record.toDomain())
                 }
 
                 val newVersion = existing.version + 1L
@@ -268,21 +266,21 @@ class ShadeCartRepository(
                     baseVersion = existing.lastSyncedVersion,
                     now = now,
                 )
-                SaveResult.Success(cartId = cartId, newVersion = newVersion)
+                ShadeCartSaveOutcome.Saved(cartId = cartId, newVersion = newVersion)
             }
         }
-        if (result is SaveResult.Success) {
+        if (result is ShadeCartSaveOutcome.Saved) {
             syncScheduler.enqueueSync()
         }
         result
     }
 
-    suspend fun updateSwatchesWithOptimisticLock(
+    override suspend fun updateSwatchesWithOptimisticLock(
         cartId: String,
         expectedCartVersion: Long,
-        swatches: List<SwatchDraft>,
-    ): SaveResult = withContext(ioDispatcher) {
-        val current = store.getCart(cartId) ?: return@withContext SaveResult.NotFound(cartId)
+        swatches: List<SwatchInput>,
+    ): ShadeCartSaveOutcome = withContext(ioDispatcher) {
+        val current = store.getCart(cartId) ?: return@withContext ShadeCartSaveOutcome.NotFound(cartId)
         saveCartWithOptimisticLock(
             cartId = cartId,
             expectedVersion = expectedCartVersion,
@@ -301,9 +299,9 @@ class ShadeCartRepository(
 
     /**
      * Drains pending items from `sync_queue` using [ShadeCartSyncAdapter].
-     * Any remote version mismatch records a non-blocking [SyncConflict] without overwriting local edits.
+     * Remote HTTP 409 / version mismatches record a non-blocking conflict without overwriting local work.
      */
-    suspend fun syncPendingQueue(): SyncBatchReport = withContext(ioDispatcher) {
+    override suspend fun syncPendingQueue(): SyncBatchSummary = withContext(ioDispatcher) {
         val pending = store.getPendingSyncItems()
         var syncedCount = 0
         var conflictCount = 0
@@ -388,7 +386,7 @@ class ShadeCartRepository(
             }
         }
 
-        SyncBatchReport(
+        SyncBatchSummary(
             processed = pending.size,
             synced = syncedCount,
             conflicts = conflictCount,
@@ -396,20 +394,20 @@ class ShadeCartRepository(
         )
     }
 
-    suspend fun resolveConflict(
+    override suspend fun resolveConflict(
         cartId: String,
-        resolution: ConflictResolution,
-    ): SaveResult = withContext(ioDispatcher) {
+        decision: ConflictDecision,
+    ): ShadeCartSaveOutcome = withContext(ioDispatcher) {
         val result = writeMutex.withLock {
             store.runInTransaction {
                 val conflictRow = store.getConflictForEntity(cartId)
-                    ?: return@runInTransaction SaveResult.NotFound(cartId)
+                    ?: return@runInTransaction ShadeCartSaveOutcome.NotFound(cartId)
                 val conflict = decodeConflictRow(conflictRow)
-                    ?: return@runInTransaction SaveResult.NotFound(cartId)
+                    ?: return@runInTransaction ShadeCartSaveOutcome.NotFound(cartId)
                 val now = nowProvider()
 
-                val chosenSnapshot = when (resolution) {
-                    ConflictResolution.KEEP_LOCAL -> {
+                val chosenSnapshot = when (decision) {
+                    ConflictDecision.KEEP_LOCAL -> {
                         val bumpedVersion = maxOf(
                             conflict.localSnapshot.version,
                             conflict.remoteSnapshot.version,
@@ -417,7 +415,7 @@ class ShadeCartRepository(
                         conflict.localSnapshot.copy(version = bumpedVersion, updatedAt = now)
                     }
 
-                    ConflictResolution.KEEP_REMOTE -> {
+                    ConflictDecision.KEEP_REMOTE -> {
                         conflict.remoteSnapshot.copy(updatedAt = now)
                     }
                 }
@@ -430,12 +428,12 @@ class ShadeCartRepository(
                     widthCm = chosenSnapshot.widthCm,
                     now = now,
                 )
-                val syncStatus = if (resolution == ConflictResolution.KEEP_LOCAL) {
+                val syncStatus = if (decision == ConflictDecision.KEEP_LOCAL) {
                     SyncStatus.PENDING
                 } else {
                     SyncStatus.SYNCED
                 }
-                val lastSyncedVersion = if (resolution == ConflictResolution.KEEP_REMOTE) {
+                val lastSyncedVersion = if (decision == ConflictDecision.KEEP_REMOTE) {
                     chosenSnapshot.version
                 } else {
                     conflict.remoteSnapshot.version
@@ -486,7 +484,7 @@ class ShadeCartRepository(
                 store.replaceSwatches(cartId, updatedSwatches)
                 store.deleteConflictSyncItems(cartId)
 
-                if (resolution == ConflictResolution.KEEP_LOCAL) {
+                if (decision == ConflictDecision.KEEP_LOCAL) {
                     enqueueSnapshotLocked(
                         snapshot = toSnapshot(updatedCart, updatedSwatches),
                         baseVersion = lastSyncedVersion,
@@ -496,16 +494,16 @@ class ShadeCartRepository(
                     store.deletePendingSyncItems(cartId)
                 }
 
-                SaveResult.Success(cartId = cartId, newVersion = updatedCart.version)
+                ShadeCartSaveOutcome.Saved(cartId = cartId, newVersion = updatedCart.version)
             }
         }
-        if (result is SaveResult.Success && resolution == ConflictResolution.KEEP_LOCAL) {
+        if (result is ShadeCartSaveOutcome.Saved && decision == ConflictDecision.KEEP_LOCAL) {
             syncScheduler.enqueueSync()
         }
         result
     }
 
-    suspend fun deleteCart(cartId: String) = withContext(ioDispatcher) {
+    override suspend fun deleteCart(cartId: String) = withContext(ioDispatcher) {
         writeMutex.withLock {
             store.runInTransaction {
                 store.deleteConflictSyncItems(cartId)
@@ -568,7 +566,7 @@ class ShadeCartRepository(
     }
 
     private suspend fun persistConflictLocked(
-        conflict: SyncConflict,
+        conflict: SyncConflictRecord,
         now: Long,
     ) {
         store.deleteConflictSyncItems(conflict.cartId)
@@ -594,18 +592,18 @@ class ShadeCartRepository(
         )
     }
 
-    private fun decodeConflictRow(row: SyncQueueEntity): SyncConflict? {
+    private fun decodeConflictRow(row: SyncQueueEntity): SyncConflictRecord? {
         val local = runCatching { json.decodeFromString<ShadeCartSnapshot>(row.payloadJson) }.getOrNull()
             ?: return null
         val remoteJson = row.conflictRemoteJson ?: return null
         val remote = runCatching { json.decodeFromString<ShadeCartSnapshot>(remoteJson) }.getOrNull()
             ?: return null
-        val source = if (row.lastError?.contains(ConflictSource.CONCURRENT_LOCAL_WRITE.name) == true) {
-            ConflictSource.CONCURRENT_LOCAL_WRITE
+        val source = if (row.lastError?.contains(ConflictOrigin.CONCURRENT_LOCAL_WRITE.name) == true) {
+            ConflictOrigin.CONCURRENT_LOCAL_WRITE
         } else {
-            ConflictSource.REMOTE_SYNC_VERSION_MISMATCH
+            ConflictOrigin.REMOTE_SYNC_VERSION_MISMATCH
         }
-        return SyncConflict(
+        return SyncConflictRecord(
             cartId = row.entityId,
             fabricName = local.fabricName,
             fabricCode = local.fabricCode,

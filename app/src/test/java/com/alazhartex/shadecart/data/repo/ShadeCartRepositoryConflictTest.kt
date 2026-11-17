@@ -9,6 +9,12 @@ import com.alazhartex.shadecart.data.local.SwatchWithRoll
 import com.alazhartex.shadecart.data.local.SyncQueueEntity
 import com.alazhartex.shadecart.data.local.SyncStatus
 import com.alazhartex.shadecart.data.sync.StubShadeCartSyncAdapter
+import com.alazhartex.shadecart.domain.model.ConflictDecision
+import com.alazhartex.shadecart.domain.model.ConflictOrigin
+import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
+import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
+import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.SyncState
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -25,6 +31,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
+/**
+ * Verifies optimistic-locking version checks, `Mutex`-serialized writes, and conflict resolution
+ * on [ShadeCartRepository] returning pure domain models (Pyre, Chapter 10.1 & Chapter 11.3).
+ */
 class ShadeCartRepositoryConflictTest {
 
     private lateinit var store: InMemoryShadeCartStore
@@ -50,13 +60,13 @@ class ShadeCartRepositoryConflictTest {
     @Test
     fun `stale expectedVersion triggers Conflict and KEEP_LOCAL resolves at higher version`() = runTest {
         val created = repository.createOrGetDraftCart(
-            ShadeCartDraft(
+            ShadeCartCreateInput(
                 fabricName = "Silk 180",
                 fabricCode = "SLK-180",
                 weightGsm = 180,
                 widthCm = 150,
                 swatches = listOf(
-                    SwatchDraft(
+                    SwatchInput(
                         id = "sw-1",
                         fabricTypeId = "fab-1",
                         swatchNumber = "5",
@@ -66,14 +76,14 @@ class ShadeCartRepositoryConflictTest {
                     ),
                 ),
             ),
-        ) as SaveResult.Success
+        ) as ShadeCartSaveOutcome.Saved
 
         // First valid save bumps version 1 -> 2
         val validUpdate = repository.updateSwatchesWithOptimisticLock(
             cartId = created.cartId,
             expectedCartVersion = 1L,
             swatches = listOf(
-                SwatchDraft(
+                SwatchInput(
                     id = "sw-1",
                     fabricTypeId = "fab-1",
                     swatchNumber = "5",
@@ -83,15 +93,15 @@ class ShadeCartRepositoryConflictTest {
                 ),
             ),
         )
-        assertTrue(validUpdate is SaveResult.Success)
-        assertEquals(2L, (validUpdate as SaveResult.Success).newVersion)
+        assertTrue(validUpdate is ShadeCartSaveOutcome.Saved)
+        assertEquals(2L, (validUpdate as ShadeCartSaveOutcome.Saved).newVersion)
 
         // Second writer attempts stale expectedVersion = 1 -> Conflict
         val staleWrite = repository.updateSwatchesWithOptimisticLock(
             cartId = created.cartId,
             expectedCartVersion = 1L,
             swatches = listOf(
-                SwatchDraft(
+                SwatchInput(
                     id = "sw-1",
                     fabricTypeId = "fab-1",
                     swatchNumber = "5",
@@ -101,35 +111,35 @@ class ShadeCartRepositoryConflictTest {
                 ),
             ),
         )
-        assertTrue(staleWrite is SaveResult.Conflict)
+        assertTrue(staleWrite is ShadeCartSaveOutcome.Conflict)
 
         val activeConflicts = repository.observeConflicts().first()
         assertEquals(1, activeConflicts.size)
-        assertEquals(ConflictSource.CONCURRENT_LOCAL_WRITE, activeConflicts.first().source)
-        assertEquals("#CD1820", activeConflicts.first().localSnapshot.swatches.first().colorHex)
-        assertEquals("#0F5132", activeConflicts.first().remoteSnapshot.swatches.first().colorHex)
+        assertEquals(ConflictOrigin.CONCURRENT_LOCAL_WRITE, activeConflicts.first().source)
+        assertEquals(2L, activeConflicts.first().localVersion)
+        assertEquals(2L, activeConflicts.first().remoteVersion)
 
         // Keep Local wins and increments version to 3
-        val resolved = repository.resolveConflict(created.cartId, ConflictResolution.KEEP_LOCAL)
-        assertTrue(resolved is SaveResult.Success)
+        val resolved = repository.resolveConflict(created.cartId, ConflictDecision.KEEP_LOCAL)
+        assertTrue(resolved is ShadeCartSaveOutcome.Saved)
         assertTrue(repository.observeConflicts().first().isEmpty())
 
         val persisted = repository.observeCart(created.cartId).first()!!
-        assertEquals(3L, persisted.cart.version)
-        assertEquals("#CD1820", persisted.swatches.first().swatch.colorHex)
-        assertEquals(SyncStatus.PENDING, persisted.cart.syncStatus)
+        assertEquals(3L, persisted.version)
+        assertEquals("#CD1820", persisted.swatches.first().colorHex)
+        assertEquals(SyncState.PENDING, persisted.syncStatus)
     }
 
     @Test
     fun `KEEP_REMOTE resolution restores stored snapshot and clears conflict`() = runTest {
         val created = repository.createOrGetDraftCart(
-            ShadeCartDraft(
+            ShadeCartCreateInput(
                 fabricName = "Silk 180",
                 fabricCode = "SLK-180",
                 weightGsm = 180,
                 widthCm = 150,
                 swatches = listOf(
-                    SwatchDraft(
+                    SwatchInput(
                         id = "sw-7",
                         fabricTypeId = "fab-1",
                         swatchNumber = "7",
@@ -139,14 +149,14 @@ class ShadeCartRepositoryConflictTest {
                     ),
                 ),
             ),
-        ) as SaveResult.Success
+        ) as ShadeCartSaveOutcome.Saved
 
         // Bump v1 -> v2
         repository.updateSwatchesWithOptimisticLock(
             cartId = created.cartId,
             expectedCartVersion = 1L,
             swatches = listOf(
-                SwatchDraft(
+                SwatchInput(
                     id = "sw-7",
                     fabricTypeId = "fab-1",
                     swatchNumber = "7",
@@ -162,7 +172,7 @@ class ShadeCartRepositoryConflictTest {
             cartId = created.cartId,
             expectedCartVersion = 1L,
             swatches = listOf(
-                SwatchDraft(
+                SwatchInput(
                     id = "sw-7",
                     fabricTypeId = "fab-1",
                     swatchNumber = "99",
@@ -173,25 +183,25 @@ class ShadeCartRepositoryConflictTest {
             ),
         )
 
-        val resolved = repository.resolveConflict(created.cartId, ConflictResolution.KEEP_REMOTE)
-        assertTrue(resolved is SaveResult.Success)
+        val resolved = repository.resolveConflict(created.cartId, ConflictDecision.KEEP_REMOTE)
+        assertTrue(resolved is ShadeCartSaveOutcome.Saved)
         assertTrue(repository.observeConflicts().first().isEmpty())
 
         val persisted = repository.observeCart(created.cartId).first()!!
-        assertEquals("7", persisted.swatches.first().swatch.swatchNumber)
-        assertEquals("#102A71", persisted.swatches.first().swatch.colorHex)
+        assertEquals("7", persisted.swatches.first().swatchNumber)
+        assertEquals("#102A71", persisted.swatches.first().colorHex)
     }
 
     @Test
     fun `remote sync version mismatch raises conflict and preserves local until user decides`() = runTest {
         val created = repository.createOrGetDraftCart(
-            ShadeCartDraft(
+            ShadeCartCreateInput(
                 fabricName = "Cotton Poplin 130",
                 fabricCode = "CTN-130",
                 weightGsm = 130,
                 widthCm = 150,
                 swatches = listOf(
-                    SwatchDraft(
+                    SwatchInput(
                         id = "sw-12",
                         fabricTypeId = "fab-ctn",
                         swatchNumber = "12",
@@ -201,7 +211,7 @@ class ShadeCartRepositoryConflictTest {
                     ),
                 ),
             ),
-        ) as SaveResult.Success
+        ) as ShadeCartSaveOutcome.Saved
 
         syncAdapter.armSimulatedConflict()
         val outcome = repository.syncPendingQueue()
@@ -210,11 +220,11 @@ class ShadeCartRepositoryConflictTest {
 
         val conflicts = repository.observeConflicts().first()
         assertEquals(1, conflicts.size)
-        assertEquals(ConflictSource.REMOTE_SYNC_VERSION_MISMATCH, conflicts.first().source)
-        assertTrue(conflicts.first().remoteSnapshot.version > conflicts.first().localSnapshot.version)
+        assertEquals(ConflictOrigin.REMOTE_SYNC_VERSION_MISMATCH, conflicts.first().source)
+        assertTrue(conflicts.first().remoteVersion > conflicts.first().localVersion)
 
         // Keeping local bumps version past remote so subsequent sync succeeds
-        assertTrue(repository.resolveConflict(created.cartId, ConflictResolution.KEEP_LOCAL) is SaveResult.Success)
+        assertTrue(repository.resolveConflict(created.cartId, ConflictDecision.KEEP_LOCAL) is ShadeCartSaveOutcome.Saved)
         val followUp = repository.syncPendingQueue()
         assertEquals(1, followUp.synced)
         assertEquals(0, followUp.conflicts)
@@ -223,13 +233,13 @@ class ShadeCartRepositoryConflictTest {
     @Test
     fun `concurrent updates serialized by Mutex never lose an update silently`() = runTest {
         val created = repository.createOrGetDraftCart(
-            ShadeCartDraft(
+            ShadeCartCreateInput(
                 fabricName = "Linen 210",
                 fabricCode = "LIN-210",
                 weightGsm = 210,
                 widthCm = 145,
                 swatches = listOf(
-                    SwatchDraft(
+                    SwatchInput(
                         id = "sw-lin-1",
                         fabricTypeId = "fab-lin",
                         swatchNumber = "1",
@@ -239,7 +249,7 @@ class ShadeCartRepositoryConflictTest {
                     ),
                 ),
             ),
-        ) as SaveResult.Success
+        ) as ShadeCartSaveOutcome.Saved
 
         store.simulatedIoDelayMillis = 15L
 
@@ -250,7 +260,7 @@ class ShadeCartRepositoryConflictTest {
                         cartId = created.cartId,
                         expectedCartVersion = 1L,
                         swatches = listOf(
-                            SwatchDraft(
+                            SwatchInput(
                                 id = "sw-lin-1",
                                 fabricTypeId = "fab-lin",
                                 swatchNumber = "1",
@@ -266,7 +276,7 @@ class ShadeCartRepositoryConflictTest {
                         cartId = created.cartId,
                         expectedCartVersion = 1L,
                         swatches = listOf(
-                            SwatchDraft(
+                            SwatchInput(
                                 id = "sw-lin-1",
                                 fabricTypeId = "fab-lin",
                                 swatchNumber = "1",
@@ -280,8 +290,8 @@ class ShadeCartRepositoryConflictTest {
             ).awaitAll()
         }
 
-        val successes = results.filterIsInstance<SaveResult.Success>()
-        val conflicts = results.filterIsInstance<SaveResult.Conflict>()
+        val successes = results.filterIsInstance<ShadeCartSaveOutcome.Saved>()
+        val conflicts = results.filterIsInstance<ShadeCartSaveOutcome.Conflict>()
         assertEquals(1, successes.size)
         assertEquals(1, conflicts.size)
         assertEquals(1, repository.observeConflicts().first().size)

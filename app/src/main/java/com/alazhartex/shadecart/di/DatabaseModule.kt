@@ -18,6 +18,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
+/**
+ * Dagger-Hilt database module provisioning the singleton Room database and its DAOs
+ * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 7.4 & Chapter 10.2).
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
@@ -48,6 +52,10 @@ object DatabaseModule {
     fun provideSyncQueueDao(db: AlAzharTexDatabase): SyncQueueDao = db.syncQueueDao()
 }
 
+/**
+ * Hilt binding associating the Room-backed [RoomShadeCartStore] with [ShadeCartStore]
+ * (Pyre, Chapter 10.2).
+ */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class StoreBindingsModule {
