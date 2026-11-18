@@ -374,7 +374,7 @@ class InventoryViewModel @Inject constructor(
                     localFilter.update {
                         it.copy(
                             statusMessage = "QR scanner unavailable (${err.message ?: "no GMS module"}). Use manual roll search.",
-                        ),
+                        )
                     }
                 }
         }
