@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<lint>
+    <!-- Enforce off-main-thread annotations (@WorkerThread / @IoDispatcher) -->
+    <issue id="WrongThread" severity="error" />
+    <issue id="WrongThreadInterprocedural" severity="error" />
+    <issue id="NewApi" severity="error" />
+    <!-- Ignore version upgrade nags so pinned reproducible builds stay green -->
+    <issue id="GradleDependency" severity="ignore" />
+    <issue id="AndroidGradlePluginVersion" severity="ignore" />
+    <issue id="ObsoleteSdkInt" severity="warning" />
+</lint>
