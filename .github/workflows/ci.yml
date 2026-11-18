@@ -41,36 +41,46 @@ jobs:
         if: steps.gradle_build.outcome == 'success'
         run: |
           python3 - << 'PYEOF'
-          import os, pathlib, re, subprocess, zipfile
+          import os, pathlib, subprocess, zipfile
 
           mapping = pathlib.Path("app/build/outputs/mapping/release/mapping.txt").read_text(errors="replace")
           lines = mapping.splitlines()
 
-          # 1. Extract blocks for -> wn1:, -> v36:, -> rd6:, plus MlKit*/CartEdit*/TwoColumn*/Pinked*
-          targets = {"wn1", "v36", "rd6"}
-          cur_orig = None
-          cur_obf = None
-          blocks = {}
-          related = []
+          # 1. Check Registrars, MlKitInitProvider, MlKitContext, ComponentDiscovery, InputImage, CartEditViewModel
+          regs = []
+          ctx_cls = []
+          ft2_map = []
+          cur_orig = ""
+          cur_obf = ""
           for ln in lines:
               if not ln.startswith(" ") and " -> " in ln and ln.endswith(":"):
                   orig, obf = ln[:-1].split(" -> ", 1)
                   cur_orig, cur_obf = orig.strip(), obf.strip()
-                  if cur_obf in targets:
-                      blocks[cur_obf] = [ln]
-                  if any(k in cur_orig for k in ("MlKitTextRecognitionGateway", "MlKitSubjectSegmentationGateway", "CartEditViewModel", "TwoColumnSwatchDetector", "PinkedSwatchSampler", "androidx.palette.graphics.Palette")):
-                      related.append((cur_orig, cur_obf))
-              elif cur_obf in targets:
-                  blocks[cur_obf].append(ln)
+                  if any(k in cur_orig for k in ("Registrar", "MlKitInitProvider", "MlKitContext", "ComponentDiscovery", "ComponentRuntime", "InputImage")):
+                      regs.append(f"{cur_orig}->{cur_obf}")
+                  if cur_obf in ("ft2", "gt2", "et2", "ct2", "q32", "ad0", "bv4", "av4", "at2", "wn1"):
+                      ctx_cls.append(f"{cur_orig}->{cur_obf}")
+              elif cur_obf in ("ft2", "gt2", "at2"):
+                  ft2_map.append(f"{cur_obf}:{ln.strip()}")
 
-          for k in ("wn1", "v36", "rd6"):
-              txt = " | ".join(blocks.get(k, ["NOT FOUND"])[:25])
-              print(f"::notice::MAP[{k}] {txt[:900]}")
+          print(f"::notice::REGS {' | '.join(regs)[:900]}")
+          print(f"::notice::CLASSES {' | '.join(ctx_cls)[:900]}")
+          print(f"::notice::FT2_MAP {' | '.join(ft2_map[:25])[:900]}")
 
-          rel_txt = " ; ".join(f"{o}->{b}" for o, b in related[:30])
-          print(f"::notice::RELATED {rel_txt[:900]}")
+          # 2. Check merged manifest providers, services, meta-data
+          mf_candidates = list(pathlib.Path("app/build/intermediates").rglob("merged_manifest/**/AndroidManifest.xml"))
+          if mf_candidates:
+              mf = mf_candidates[0].read_text(errors="replace")
+              interesting = [l.strip() for l in mf.splitlines() if any(k in l for k in ("provider", "service", "ComponentRegistrar", "MlKit", "mlkit", "firebase"))]
+              print(f"::notice::MANIFEST {' | '.join(interesting)[:900]}")
 
-          # 2. Disassemble target classes from release APK
+          # 3. Check aapt_rules.txt and consumer proguard files for mlkit/firebase/gms
+          aapt = list(pathlib.Path("app/build/intermediates").rglob("aapt_rules.txt"))
+          if aapt:
+              alines = [l.strip() for l in aapt[0].read_text(errors="replace").splitlines() if any(k in l.lower() for k in ("mlkit", "firebase", "gms", "registrar"))]
+              print(f"::notice::AAPT_RULES {' | '.join(alines)[:900]}")
+
+          # 4. Disassemble Lwn1;, Lft2;, Lbv4;, Lav4;, Lad0; around a() / invokeSuspend / getClass
           apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
           sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
           dexdump = sorted(pathlib.Path(sdk, "build-tools").glob("*/dexdump"))[-1]
@@ -81,38 +91,24 @@ jobs:
                   if name.endswith(".dex"):
                       zf.extract(name, tmp_dex)
 
-          obf_set = {"wn1", "v36", "rd6"} | {b for _, b in related}
-          want_desc = {f"L{b.replace('.', '/')};" for b in obf_set}
-
           for dex in sorted(tmp_dex.glob("*.dex")):
               out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
-              # split by Class descriptor
               chunks = out.split("Class descriptor  : ")
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
                   if desc == "Lwn1;":
-                      # print methods of Lwn1;
-                      snippet = " | ".join(l.strip() for l in ch.splitlines()[:60])
-                      print(f"::notice::DEX[Lwn1;] {snippet[:900]}")
-                  if desc in want_desc and "getClass" in ch:
+                      # find where v36 is referenced
+                      mlines = ch.splitlines()
+                      hits = [ " // ".join(x.strip() for x in mlines[max(0,i-8):i+6]) for i, ml in enumerate(mlines) if "Lv36;" in ml or "Lrd6;" in ml ]
+                      print(f"::notice::DEX_WN1_V36 {' || '.join(hits)[:900]}")
+                  if desc in ("Lft2;", "Lbv4;", "Lav4;", "Lad0;") and "getClass" in ch:
                       mlines = ch.splitlines()
                       hits = []
                       for idx, ml in enumerate(mlines):
                           if "getClass" in ml:
-                              ctx = " // ".join(x.strip() for x in mlines[max(0, idx-12):idx+4])
+                              ctx = " // ".join(x.strip() for x in mlines[max(0, idx-14):idx+6])
                               hits.append(ctx)
                       print(f"::notice::GETCLASS[{desc}] {' || '.join(hits)[:900]}")
-
-          # 3. Check merged release manifest providers and firebase components
-          mf_candidates = list(pathlib.Path("app/build/intermediates").rglob("merged_manifest/**/AndroidManifest.xml"))
-          if mf_candidates:
-              mf = mf_candidates[0].read_text(errors="replace")
-              interesting = [l.strip() for l in mf.splitlines() if any(k in l for k in ("provider", "ComponentRegistrar", "MlKit", "mlkit", "gms"))]
-              print(f"::notice::MANIFEST {' | '.join(interesting)[:900]}")
-
-          # 4. Check missing_rules.txt if present
-          for mr in pathlib.Path("app/build/outputs").rglob("missing_rules.txt"):
-              print(f"::notice::MISSING_RULES {mr.read_text(errors='replace').replace(chr(10), ' | ')[:900]}")
           PYEOF
 
       - name: Annotate compiler errors
