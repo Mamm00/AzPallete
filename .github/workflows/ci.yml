@@ -53,42 +53,38 @@ jobs:
                   if name.endswith(".dex"):
                       zf.extract(name, tmp_dex)
 
-          reg_descs = {
-              "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;",
-              "Lcom/google/mlkit/vision/text/internal/TextRegistrar;",
-              "Lcom/google/mlkit/vision/common/internal/VisionCommonRegistrar;",
-              "Lcom/google/mlkit/common/internal/CommonComponentRegistrar;",
-          }
-          reg_checks = []
           for dex in sorted(tmp_dex.glob("*.dex")):
               out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
               chunks = out.split("Class descriptor  : ")
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
-                  if desc in reg_descs:
-                      has_init = "<init>" in ch
-                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
-                      reg_checks.append(f"{desc.split('/')[-1]} init={has_init} dm={' '.join(l.strip() for l in dm.splitlines()[:6])}")
-                  if desc == "Lft2;":
-                      parts = ch.split("name          : ")
-                      for p in parts[1:]:
-                          if "Lq32;" in p or "Lit2;" in p:
-                              txt = " | ".join(l.strip() for l in p.splitlines())
-                              print(f"::notice::FT2_SUSP1 {txt[:900]}")
-                              print(f"::notice::FT2_SUSP2 {txt[900:1800]}")
-                              print(f"::notice::FT2_SUSP3 {txt[1800:2700]}")
                   if desc == "Lq32;":
-                      txt = " | ".join(l.strip() for l in ch.splitlines())
-                      print(f"::notice::Q32_DEX {txt[:900]}")
-          print(f"::notice::REG_CHECKS {' || '.join(reg_checks)[:900]}")
-
-          pro_hits = []
-          for p in sorted(pathlib.Path("app/build/intermediates").rglob("*.txt")) + sorted(pathlib.Path("app/build/intermediates").rglob("*.pro")):
+                      idx = ch.find("name          : 'a'")
+                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines()[:70])
+                      print(f"::notice::Q32_A {txt[:900]}")
+                      print(f"::notice::Q32_A2 {txt[900:1800]}")
+                  if desc == "Lft2;":
+                      idx = ch.find("invokeSuspend")
+                      sub = ch[idx:]
+                      lines = sub.splitlines()
+                      mid = " | ".join(l.strip() for l in lines[25:95])
+                      tail = " | ".join(l.strip() for l in lines[95:165])
+                      catches = " | ".join(l.strip() for l in lines if "tries" in l or "catch" in l or "0x00" in l[:10])
+                      print(f"::notice::FT2_MID {mid[:900]}")
+                      print(f"::notice::FT2_TAIL {tail[:900]}")
+                      print(f"::notice::FT2_CATCH {catches[:900]}")
+                  if "Camera2Config" in desc or "Initializer" in desc or "Glance" in desc or "Barcode" in desc or "Document" in desc:
+                      has_init = False
+                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
+                      has_init = "<init>" in dm
+                      if not has_init:
+                          print(f"::notice::NO_INIT {desc}")
+          pro_rules = []
+          for p in sorted(pathlib.Path("app/build/intermediates").rglob("proguard*.txt")):
               t = p.read_text(errors="replace")
-              if "ComponentRegistrar" in t:
-                  hits = [l.strip() for l in t.splitlines() if "registrar" in l.lower() or "firebase" in l.lower() or "init" in l.lower()]
-                  pro_hits.append(f"{p.name}:{' | '.join(hits)}")
-          print(f"::notice::PRO_REG {' || '.join(pro_hits)[:900]}")
+              if "ComponentRegistrar" in t or "MlKit" in t:
+                  pro_rules.append(f"{p.parent.name}/{p.name}:" + " | ".join(l.strip() for l in t.splitlines() if l.strip() and not l.strip().startswith("#")))
+          print(f"::notice::PRO_RULES {' || '.join(pro_rules)[:900]}")
           PYEOF
 
       - name: Annotate compiler errors
