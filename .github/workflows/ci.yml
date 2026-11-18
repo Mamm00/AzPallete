@@ -59,32 +59,23 @@ jobs:
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
                   if desc == "Lq32;":
+                      # find static method 'a'
                       idx = ch.find("name          : 'a'")
-                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines()[:70])
-                      print(f"::notice::Q32_A {txt[:900]}")
-                      print(f"::notice::Q32_A2 {txt[900:1800]}")
+                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines())
+                      print(f"::notice::Q32_STATIC_A1 {txt[:900]}")
+                      print(f"::notice::Q32_STATIC_A2 {txt[900:1800]}")
+                  if desc in ("Lve3;", "Lav4;", "Ll44;", "Lia3;", "Lse3;"):
+                      mlines = ch.splitlines()
+                      hits = [" // ".join(x.strip() for x in mlines[max(0,i-4):i+4]) for i, ml in enumerate(mlines) if "getClass" in ml]
+                      if hits:
+                          print(f"::notice::GC_CHECK[{desc}] {' || '.join(hits)[:900]}")
                   if desc == "Lft2;":
-                      idx = ch.find("invokeSuspend")
-                      sub = ch[idx:]
-                      lines = sub.splitlines()
-                      mid = " | ".join(l.strip() for l in lines[25:95])
-                      tail = " | ".join(l.strip() for l in lines[95:165])
-                      catches = " | ".join(l.strip() for l in lines if "tries" in l or "catch" in l or "0x00" in l[:10])
-                      print(f"::notice::FT2_MID {mid[:900]}")
-                      print(f"::notice::FT2_TAIL {tail[:900]}")
-                      print(f"::notice::FT2_CATCH {catches[:900]}")
-                  if "Camera2Config" in desc or "Initializer" in desc or "Glance" in desc or "Barcode" in desc or "Document" in desc:
-                      has_init = False
-                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
-                      has_init = "<init>" in dm
-                      if not has_init:
-                          print(f"::notice::NO_INIT {desc}")
-          pro_rules = []
-          for p in sorted(pathlib.Path("app/build/intermediates").rglob("proguard*.txt")):
-              t = p.read_text(errors="replace")
-              if "ComponentRegistrar" in t or "MlKit" in t:
-                  pro_rules.append(f"{p.parent.name}/{p.name}:" + " | ".join(l.strip() for l in t.splitlines() if l.strip() and not l.strip().startswith("#")))
-          print(f"::notice::PRO_RULES {' || '.join(pro_rules)[:900]}")
+                      # print from line 0026 to 006f of invokeSuspend
+                      idx = ch.find("0026:")
+                      if idx >= 0:
+                          txt = " | ".join(l.strip() for l in ch[idx:idx+4000].splitlines())
+                          print(f"::notice::FT2_BODY1 {txt[:900]}")
+                          print(f"::notice::FT2_BODY2 {txt[900:1800]}")
           PYEOF
 
       - name: Annotate compiler errors
