@@ -30,14 +30,14 @@ jobs:
       - name: Grant execute permissions
         run: chmod +x gradlew tools/ci_gradle_annotate.sh
 
-      - name: Run Unit Tests, Lint & Assemble Debug APK
+      - name: Run Unit Tests, Lint & Assemble Debug/Release APKs
         id: gradle_build
         run: |
           set -o pipefail
-          ./gradlew assembleRelease --stacktrace --no-daemon 2>&1 | tee gradle.log
+          ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace --no-daemon 2>&1 | tee gradle.log
         continue-on-error: true
 
-      - name: Inspect R8 mapping and bytecode (temp diagnostic)
+      - name: Verify R8 Release Keeps ML Kit ComponentRegistrars
         if: steps.gradle_build.outcome == 'success'
         run: |
           python3 - << 'PYEOF'
@@ -46,40 +46,37 @@ jobs:
           apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
           sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
           dexdump = sorted(pathlib.Path(sdk, "build-tools").glob("*/dexdump"))[-1]
-          tmp_dex = pathlib.Path("/tmp/rel_dex")
+          tmp_dex = pathlib.Path("/tmp/ci_rel_dex")
           tmp_dex.mkdir(parents=True, exist_ok=True)
           with zipfile.ZipFile(apk) as zf:
               for name in zf.namelist():
                   if name.endswith(".dex"):
                       zf.extract(name, tmp_dex)
 
+          expected = {
+              "Lcom/google/mlkit/common/internal/CommonComponentRegistrar;",
+              "Lcom/google/mlkit/vision/common/internal/VisionCommonRegistrar;",
+              "Lcom/google/mlkit/vision/text/internal/TextRegistrar;",
+              "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;",
+          }
+          found_init = set()
           for dex in sorted(tmp_dex.glob("*.dex")):
               out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
-              chunks = out.split("Class descriptor  : ")
-              for ch in chunks[1:]:
+              for ch in out.split("Class descriptor  : ")[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
-                  if desc == "Lq32;":
-                      idx = ch.find("q32.a:(Landroid/graphics/Bitmap;)Lq32;")
-                      if idx < 0: idx = ch.find("Virtual methods")
-                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines()[:70])
-                      print(f"::notice::Q32_METHOD_A1 {txt[:900]}")
-                      print(f"::notice::Q32_METHOD_A2 {txt[900:1800]}")
-                  if desc == "Lft2;":
-                      idx = ch.find("ft2.invokeSuspend:")
-                      sub = ch[idx:]
-                      # print from 003a to end of tries
-                      s_idx = sub.find("003a:")
-                      c_idx = sub.find("catches       :")
-                      print(f"::notice::FT2_3A { ' | '.join(l.strip() for l in sub[s_idx:s_idx+1800].splitlines())[:900]}")
-                      print(f"::notice::FT2_TRIES { ' | '.join(l.strip() for l in sub[c_idx:c_idx+1200].splitlines())[:900]}")
-                  if desc == "Lwc0;":
-                      # check all invoke-virtual/static calls in wc0.invokeSuspend
-                      idx = ch.find("wc0.invokeSuspend:")
-                      sub = ch[idx:]
-                      mlines = sub.splitlines()
-                      gcs = [" // ".join(x.strip() for x in mlines[max(0,i-3):i+2]) for i, ml in enumerate(mlines) if "getClass" in ml]
-                      print(f"::notice::WC0_ALL_GC {' || '.join(gcs)[:900]}")
-                      print(f"::notice::WC0_ALL_GC2 {' || '.join(gcs)[900:1800]}")
+                  if desc in expected:
+                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
+                      vm = ch[ch.find("Virtual methods"):]
+                      if "<init>" not in dm or "getComponents" not in vm:
+                          print(f"::error::R8 stripped constructor or getComponents from {desc}")
+                          raise SystemExit(1)
+                      found_init.add(desc)
+
+          missing = expected - found_init
+          if missing:
+              print(f"::error::Missing ML Kit registrars in release APK: {sorted(missing)}")
+              raise SystemExit(1)
+          print("Verified R8 release APK keeps <init> and getComponents for all ML Kit registrars:", sorted(found_init))
           PYEOF
 
       - name: Annotate compiler errors
@@ -115,7 +112,6 @@ jobs:
   instrumented-ui-tests:
     name: Instrumented Compose UI Tests (API 35)
     needs: build-lint-and-unit-tests
-    if: false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
