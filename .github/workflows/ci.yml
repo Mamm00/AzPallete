@@ -43,33 +43,6 @@ jobs:
           python3 - << 'PYEOF'
           import os, pathlib, subprocess, zipfile
 
-          mapping = pathlib.Path("app/build/outputs/mapping/release/mapping.txt").read_text(errors="replace")
-          lines = mapping.splitlines()
-
-          # Check wc0 mapping + SubjectSegmentationRegistrar + TextRegistrar + ComponentRegistrar
-          targets = {
-              "com.google.mlkit.vision.segmentation.subject.internal.SubjectSegmentationRegistrar",
-              "com.google.mlkit.vision.text.internal.TextRegistrar",
-              "com.google.mlkit.vision.common.internal.VisionCommonRegistrar",
-              "com.google.firebase.components.ComponentRegistrar",
-              "com.google.mlkit.common.sdkinternal.MlKitContext",
-          }
-          cur_orig = ""
-          cur_obf = ""
-          out_map = []
-          for ln in lines:
-              if not ln.startswith(" ") and " -> " in ln and ln.endswith(":"):
-                  orig, obf = ln[:-1].split(" -> ", 1)
-                  cur_orig, cur_obf = orig.strip(), obf.strip()
-                  if cur_orig in targets or cur_obf in ("wc0", "ft2", "it2"):
-                      out_map.append(f"[{cur_orig}->{cur_obf}]")
-              elif cur_orig in targets or cur_obf in ("wc0",):
-                  out_map.append(ln.strip())
-
-          mtxt = " | ".join(out_map)
-          print(f"::notice::MAP_SURG1 {mtxt[:900]}")
-          print(f"::notice::MAP_SURG2 {mtxt[900:1800]}")
-
           apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
           sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
           dexdump = sorted(pathlib.Path(sdk, "build-tools").glob("*/dexdump"))[-1]
@@ -80,33 +53,42 @@ jobs:
                   if name.endswith(".dex"):
                       zf.extract(name, tmp_dex)
 
+          reg_descs = {
+              "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;",
+              "Lcom/google/mlkit/vision/text/internal/TextRegistrar;",
+              "Lcom/google/mlkit/vision/common/internal/VisionCommonRegistrar;",
+              "Lcom/google/mlkit/common/internal/CommonComponentRegistrar;",
+          }
+          reg_checks = []
           for dex in sorted(tmp_dex.glob("*.dex")):
               out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
               chunks = out.split("Class descriptor  : ")
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
+                  if desc in reg_descs:
+                      has_init = "<init>" in ch
+                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
+                      reg_checks.append(f"{desc.split('/')[-1]} init={has_init} dm={' '.join(l.strip() for l in dm.splitlines()[:6])}")
                   if desc == "Lft2;":
-                      idx = ch.find("name          : 'o'")
-                      if idx < 0: idx = ch.find("Virtual methods")
-                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines())
-                      print(f"::notice::FT2_VIRT {txt[:900]}")
-                      print(f"::notice::FT2_VIRT2 {txt[900:1800]}")
-                  if desc == "Lat2;":
+                      parts = ch.split("name          : ")
+                      for p in parts[1:]:
+                          if "Lq32;" in p or "Lit2;" in p:
+                              txt = " | ".join(l.strip() for l in p.splitlines())
+                              print(f"::notice::FT2_SUSP1 {txt[:900]}")
+                              print(f"::notice::FT2_SUSP2 {txt[900:1800]}")
+                              print(f"::notice::FT2_SUSP3 {txt[1800:2700]}")
+                  if desc == "Lq32;":
                       txt = " | ".join(l.strip() for l in ch.splitlines())
-                      print(f"::notice::AT2_DEX1 {txt[:900]}")
-                      print(f"::notice::AT2_DEX2 {txt[900:1800]}")
-                  if desc == "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;":
-                      txt = " | ".join(l.strip() for l in ch.splitlines())
-                      print(f"::notice::SSR_DEX {txt[:900]}")
-                  if desc == "Lwc0;":
-                      mlines = ch.splitlines()
-                      hits = [" // ".join(x.strip() for x in mlines[max(0,i-4):i+3]) for i, ml in enumerate(mlines) if "getClass" in ml]
-                      print(f"::notice::WC0_GCS {' || '.join(hits)[:900]}")
-                  if desc == "Lit2;":
-                      idx = ch.find("name          : 'l'")
-                      if idx >= 0:
-                          txt = " | ".join(l.strip() for l in ch[idx:idx+2500].splitlines())
-                          print(f"::notice::IT2_L {txt[:900]}")
+                      print(f"::notice::Q32_DEX {txt[:900]}")
+          print(f"::notice::REG_CHECKS {' || '.join(reg_checks)[:900]}")
+
+          pro_hits = []
+          for p in sorted(pathlib.Path("app/build/intermediates").rglob("*.txt")) + sorted(pathlib.Path("app/build/intermediates").rglob("*.pro")):
+              t = p.read_text(errors="replace")
+              if "ComponentRegistrar" in t:
+                  hits = [l.strip() for l in t.splitlines() if "registrar" in l.lower() or "firebase" in l.lower() or "init" in l.lower()]
+                  pro_hits.append(f"{p.name}:{' | '.join(hits)}")
+          print(f"::notice::PRO_REG {' || '.join(pro_hits)[:900]}")
           PYEOF
 
       - name: Annotate compiler errors
