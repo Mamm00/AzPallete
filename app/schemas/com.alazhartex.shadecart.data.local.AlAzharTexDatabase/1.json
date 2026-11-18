@@ -1,0 +1,225 @@
+{
+  "formatVersion": 1,
+  "database": {
+    "version": 1,
+    "identityHash": "8f2c7b1e4d91a0e3b76c2f5d1a904e11",
+    "entities": [
+      {
+        "tableName": "fabric_types",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `name` TEXT NOT NULL, `code` TEXT NOT NULL, `weight_gsm` INTEGER NOT NULL, `width_cm` INTEGER NOT NULL, `version` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          { "fieldPath": "id", "columnName": "id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "name", "columnName": "name", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "code", "columnName": "code", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "weightGsm", "columnName": "weight_gsm", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "widthCm", "columnName": "width_cm", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "version", "columnName": "version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "updatedAt", "columnName": "updated_at", "affinity": "INTEGER", "notNull": true }
+        ],
+        "primaryKey": { "autoGenerate": false, "columnNames": ["id"] },
+        "indices": [
+          {
+            "name": "index_fabric_types_code",
+            "unique": true,
+            "columnNames": ["code"],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_fabric_types_code` ON `${TABLE_NAME}` (`code`)"
+          }
+        ],
+        "foreignKeys": []
+      },
+      {
+        "tableName": "rolls",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `roll_code` TEXT NOT NULL, `fabric_type_id` TEXT NOT NULL, `shade_label` TEXT NOT NULL, `color_name` TEXT NOT NULL, `color_hex` TEXT NOT NULL, `warehouse_shed` TEXT NOT NULL, `length_meters` REAL NOT NULL, `status` TEXT NOT NULL, `version` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`fabric_type_id`) REFERENCES `fabric_types`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT )",
+        "fields": [
+          { "fieldPath": "id", "columnName": "id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "rollCode", "columnName": "roll_code", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "fabricTypeId", "columnName": "fabric_type_id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "shadeLabel", "columnName": "shade_label", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "colorName", "columnName": "color_name", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "colorHex", "columnName": "color_hex", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "warehouseShed", "columnName": "warehouse_shed", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "lengthMeters", "columnName": "length_meters", "affinity": "REAL", "notNull": true },
+          { "fieldPath": "status", "columnName": "status", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "version", "columnName": "version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "updatedAt", "columnName": "updated_at", "affinity": "INTEGER", "notNull": true }
+        ],
+        "primaryKey": { "autoGenerate": false, "columnNames": ["id"] },
+        "indices": [
+          {
+            "name": "index_rolls_fabric_type_id",
+            "unique": false,
+            "columnNames": ["fabric_type_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_rolls_fabric_type_id` ON `${TABLE_NAME}` (`fabric_type_id`)"
+          },
+          {
+            "name": "index_rolls_roll_code",
+            "unique": true,
+            "columnNames": ["roll_code"],
+            "orders": [],
+            "createSql": "CREATE UNIQUE INDEX IF NOT EXISTS `index_rolls_roll_code` ON `${TABLE_NAME}` (`roll_code`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "fabric_types",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": ["fabric_type_id"],
+            "referencedColumns": ["id"]
+          }
+        ]
+      },
+      {
+        "tableName": "shade_carts",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `fabric_type_id` TEXT, `fabric_name` TEXT NOT NULL, `fabric_code` TEXT NOT NULL, `weight_gsm` INTEGER NOT NULL, `width_cm` INTEGER NOT NULL, `original_image_path` TEXT, `edited_image_path` TEXT, `edit_stack_json` TEXT NOT NULL, `header_ocr_raw` TEXT NOT NULL, `sync_status` TEXT NOT NULL, `version` INTEGER NOT NULL, `last_synced_version` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`fabric_type_id`) REFERENCES `fabric_types`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          { "fieldPath": "id", "columnName": "id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "fabricTypeId", "columnName": "fabric_type_id", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "fabricName", "columnName": "fabric_name", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "fabricCode", "columnName": "fabric_code", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "weightGsm", "columnName": "weight_gsm", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "widthCm", "columnName": "width_cm", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "originalImagePath", "columnName": "original_image_path", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "editedImagePath", "columnName": "edited_image_path", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "editStackJson", "columnName": "edit_stack_json", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "headerOcrRaw", "columnName": "header_ocr_raw", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "syncStatus", "columnName": "sync_status", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "version", "columnName": "version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "lastSyncedVersion", "columnName": "last_synced_version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "updatedAt", "columnName": "updated_at", "affinity": "INTEGER", "notNull": true }
+        ],
+        "primaryKey": { "autoGenerate": false, "columnNames": ["id"] },
+        "indices": [
+          {
+            "name": "index_shade_carts_fabric_type_id",
+            "unique": false,
+            "columnNames": ["fabric_type_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_shade_carts_fabric_type_id` ON `${TABLE_NAME}` (`fabric_type_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "fabric_types",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": ["fabric_type_id"],
+            "referencedColumns": ["id"]
+          }
+        ]
+      },
+      {
+        "tableName": "swatches",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `shade_cart_id` TEXT NOT NULL, `fabric_type_id` TEXT NOT NULL, `roll_id` TEXT, `swatch_number` TEXT NOT NULL, `color_hex` TEXT NOT NULL, `color_name` TEXT NOT NULL, `position_order` INTEGER NOT NULL, `bbox_left` REAL NOT NULL, `bbox_top` REAL NOT NULL, `bbox_right` REAL NOT NULL, `bbox_bottom` REAL NOT NULL, `is_overridden` INTEGER NOT NULL, `version` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`), FOREIGN KEY(`shade_cart_id`) REFERENCES `shade_carts`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE , FOREIGN KEY(`fabric_type_id`) REFERENCES `fabric_types`(`id`) ON UPDATE NO ACTION ON DELETE RESTRICT , FOREIGN KEY(`roll_id`) REFERENCES `rolls`(`id`) ON UPDATE NO ACTION ON DELETE SET NULL )",
+        "fields": [
+          { "fieldPath": "id", "columnName": "id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "shadeCartId", "columnName": "shade_cart_id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "fabricTypeId", "columnName": "fabric_type_id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "rollId", "columnName": "roll_id", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "swatchNumber", "columnName": "swatch_number", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "colorHex", "columnName": "color_hex", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "colorName", "columnName": "color_name", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "positionOrder", "columnName": "position_order", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "bboxLeft", "columnName": "bbox_left", "affinity": "REAL", "notNull": true },
+          { "fieldPath": "bboxTop", "columnName": "bbox_top", "affinity": "REAL", "notNull": true },
+          { "fieldPath": "bboxRight", "columnName": "bbox_right", "affinity": "REAL", "notNull": true },
+          { "fieldPath": "bboxBottom", "columnName": "bbox_bottom", "affinity": "REAL", "notNull": true },
+          { "fieldPath": "isOverridden", "columnName": "is_overridden", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "version", "columnName": "version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "updatedAt", "columnName": "updated_at", "affinity": "INTEGER", "notNull": true }
+        ],
+        "primaryKey": { "autoGenerate": false, "columnNames": ["id"] },
+        "indices": [
+          {
+            "name": "index_swatches_shade_cart_id",
+            "unique": false,
+            "columnNames": ["shade_cart_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_swatches_shade_cart_id` ON `${TABLE_NAME}` (`shade_cart_id`)"
+          },
+          {
+            "name": "index_swatches_fabric_type_id",
+            "unique": false,
+            "columnNames": ["fabric_type_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_swatches_fabric_type_id` ON `${TABLE_NAME}` (`fabric_type_id`)"
+          },
+          {
+            "name": "index_swatches_roll_id",
+            "unique": false,
+            "columnNames": ["roll_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_swatches_roll_id` ON `${TABLE_NAME}` (`roll_id`)"
+          }
+        ],
+        "foreignKeys": [
+          {
+            "table": "shade_carts",
+            "onDelete": "CASCADE",
+            "onUpdate": "NO ACTION",
+            "columns": ["shade_cart_id"],
+            "referencedColumns": ["id"]
+          },
+          {
+            "table": "fabric_types",
+            "onDelete": "RESTRICT",
+            "onUpdate": "NO ACTION",
+            "columns": ["fabric_type_id"],
+            "referencedColumns": ["id"]
+          },
+          {
+            "table": "rolls",
+            "onDelete": "SET NULL",
+            "onUpdate": "NO ACTION",
+            "columns": ["roll_id"],
+            "referencedColumns": ["id"]
+          }
+        ]
+      },
+      {
+        "tableName": "sync_queue",
+        "createSql": "CREATE TABLE IF NOT EXISTS `${TABLE_NAME}` (`id` TEXT NOT NULL, `entity_type` TEXT NOT NULL, `entity_id` TEXT NOT NULL, `operation` TEXT NOT NULL, `payload_json` TEXT NOT NULL, `base_version` INTEGER NOT NULL, `status` TEXT NOT NULL, `conflict_remote_json` TEXT, `conflict_remote_version` INTEGER, `attempt_count` INTEGER NOT NULL, `last_error` TEXT, `created_at` INTEGER NOT NULL, `updated_at` INTEGER NOT NULL, PRIMARY KEY(`id`))",
+        "fields": [
+          { "fieldPath": "id", "columnName": "id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "entityType", "columnName": "entity_type", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "entityId", "columnName": "entity_id", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "operation", "columnName": "operation", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "payloadJson", "columnName": "payload_json", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "baseVersion", "columnName": "base_version", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "status", "columnName": "status", "affinity": "TEXT", "notNull": true },
+          { "fieldPath": "conflictRemoteJson", "columnName": "conflict_remote_json", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "conflictRemoteVersion", "columnName": "conflict_remote_version", "affinity": "INTEGER", "notNull": false },
+          { "fieldPath": "attemptCount", "columnName": "attempt_count", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "lastError", "columnName": "last_error", "affinity": "TEXT", "notNull": false },
+          { "fieldPath": "createdAt", "columnName": "created_at", "affinity": "INTEGER", "notNull": true },
+          { "fieldPath": "updatedAt", "columnName": "updated_at", "affinity": "INTEGER", "notNull": true }
+        ],
+        "primaryKey": { "autoGenerate": false, "columnNames": ["id"] },
+        "indices": [
+          {
+            "name": "index_sync_queue_entity_id",
+            "unique": false,
+            "columnNames": ["entity_id"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_queue_entity_id` ON `${TABLE_NAME}` (`entity_id`)"
+          },
+          {
+            "name": "index_sync_queue_status",
+            "unique": false,
+            "columnNames": ["status"],
+            "orders": [],
+            "createSql": "CREATE INDEX IF NOT EXISTS `index_sync_queue_status` ON `${TABLE_NAME}` (`status`)"
+          }
+        ],
+        "foreignKeys": []
+      }
+    ],
+    "views": [],
+    "setupQueries": [
+      "CREATE TABLE IF NOT EXISTS room_master_table (id INTEGER PRIMARY KEY,identity_hash TEXT)",
+      "INSERT OR REPLACE INTO room_master_table (id,identity_hash) VALUES(42, '8f2c7b1e4d91a0e3b76c2f5d1a904e11')"
+    ]
+  }
+}

@@ -7,6 +7,9 @@
     <string name="tab_shade_cart">Shade Cart</string>
     <string name="tab_capture">Capture</string>
     <string name="tab_palette">Palette</string>
+    <string name="tab_mill_hub">Mill Hub</string>
+    <string name="tab_search">Search</string>
+    <string name="tab_insights">Insights</string>
     <string name="camera_rationale_title">Camera Access Needed</string>
     <string name="camera_rationale_body">Al AzharTex uses your camera to photograph physical A4 fabric shade carts and extract swatch colors and numeric labels. You can also upload an existing photo from your gallery.</string>
     <string name="camera_permanently_denied_body">Camera access is permanently denied. Open system app settings to enable Camera permission, or upload a shade cart photo from your gallery.</string>
@@ -14,6 +17,7 @@
     <string name="open_settings">Open Settings</string>
     <string name="upload_from_gallery">Upload Photo</string>
     <string name="load_sample_cart">Load Sample A4 Cart</string>
+    <string name="auto_scan_card">Auto-Scan</string>
     <string name="no_swatches_title">No Swatches Yet</string>
     <string name="no_swatches_body">This digital shade cart has no color swatches recorded. Detect swatches from a captured card or add them manually.</string>
     <string name="add_swatch_manually">Add swatch manually</string>
@@ -21,4 +25,24 @@
     <string name="mlkit_model_missing_body">ML Kit Subject Segmentation needs a one-time on-device model download. Until it is ready, you can continue with crop-only editing.</string>
     <string name="download_model">Download Model</string>
     <string name="continue_crop_only">Crop-Only Mode</string>
+    <string name="widget_description">Al AzharTex sync status, low-stock alerts, and quick card capture</string>
+    <string name="calibrated_badge">Calibrated ✓</string>
+    <string name="shadelock_calibration">ShadeLock™ Gray Card Calibration</string>
+    <string name="drape_preview">2.5D Fabric Drape Preview</string>
+    <string name="buyer_mode_title">Buyer Mode</string>
+    <string name="buyer_showcase_title">Buyer Showcase</string>
+    <string name="exit_buyer_mode">Exit Buyer Mode</string>
+    <string name="request_quote">Request Quote</string>
+    <string name="ask_azpallete">Ask AzPallete</string>
+    <string name="ask_azpallete_title">Ask AzPallete</string>
+    <string name="reverse_finder">Finder</string>
+    <string name="rolls_lots_cuts">Rolls &amp; Lots</string>
+    <string name="ask_insights">Ask &amp; Stats</string>
+    <string name="reverse_shade_finder_title">Reverse Shade Finder (ΔE₂₀₀₀)</string>
+    <string name="mill_insights_title">Mill Analytics &amp; Insights</string>
+    <string name="language_setting">App Language</string>
+    <string name="operator_role_setting">Operator Role</string>
+    <string name="glove_mode_label">Glove Mode (48–56dp touch targets)</string>
+    <string name="low_stock_alert_title">%1$d Rolls Below Stock Threshold</string>
+    <string name="d65_disclaimer">CIEDE2000 values compare sRGB captures under D65 simulation. Phone cameras are not spectrophotometers; confirm critical dye sign-offs with a BLE spectrophotometer.</string>
 </resources>

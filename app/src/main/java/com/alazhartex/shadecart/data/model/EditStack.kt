@@ -33,6 +33,7 @@ data class EditStep(
     val type: EditStepType,
     val description: String,
     val timestampMillis: Long,
+    val kernelFraction: Float? = null,
 )
 
 @Serializable
@@ -41,6 +42,8 @@ enum class EditStepType {
     ASPECT_PRESET,
     ROTATION,
     BACKGROUND_REMOVAL,
+    FLATTEN_LIGHTING,
+    SWATCH_OVERLAY_EDIT,
 }
 
 /**
@@ -54,5 +57,7 @@ data class EditStack(
     val backgroundRemoved: Boolean = false,
     val segmentationMaskPath: String? = null,
     val rotationDegrees: Int = 0,
+    val flattenLighting: Boolean = false,
+    val lightingKernelFraction: Float = 0.10f,
     val history: List<EditStep> = emptyList(),
 )

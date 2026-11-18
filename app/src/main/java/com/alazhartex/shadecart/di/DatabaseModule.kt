@@ -3,7 +3,11 @@ package com.alazhartex.shadecart.di
 import android.content.Context
 import androidx.room.Room
 import com.alazhartex.shadecart.data.local.AlAzharTexDatabase
+import com.alazhartex.shadecart.data.local.CutLogDao
+import com.alazhartex.shadecart.data.local.DyeLotDao
 import com.alazhartex.shadecart.data.local.FabricTypeDao
+import com.alazhartex.shadecart.data.local.PriceTierDao
+import com.alazhartex.shadecart.data.local.ReservationDao
 import com.alazhartex.shadecart.data.local.RollDao
 import com.alazhartex.shadecart.data.local.ShadeCartDao
 import com.alazhartex.shadecart.data.local.SwatchDao
@@ -18,10 +22,6 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import javax.inject.Singleton
 
-/**
- * Dagger-Hilt database module provisioning the singleton Room database and its DAOs
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 7.4 & Chapter 10.2).
- */
 @Module
 @InstallIn(SingletonComponent::class)
 object DatabaseModule {
@@ -34,7 +34,9 @@ object DatabaseModule {
         context,
         AlAzharTexDatabase::class.java,
         "alazhartex_shadecart.db",
-    ).build()
+    )
+        .addMigrations(AlAzharTexDatabase.MIGRATION_1_2)
+        .build()
 
     @Provides
     fun provideFabricTypeDao(db: AlAzharTexDatabase): FabricTypeDao = db.fabricTypeDao()
@@ -50,12 +52,20 @@ object DatabaseModule {
 
     @Provides
     fun provideSyncQueueDao(db: AlAzharTexDatabase): SyncQueueDao = db.syncQueueDao()
+
+    @Provides
+    fun provideDyeLotDao(db: AlAzharTexDatabase): DyeLotDao = db.dyeLotDao()
+
+    @Provides
+    fun provideReservationDao(db: AlAzharTexDatabase): ReservationDao = db.reservationDao()
+
+    @Provides
+    fun provideCutLogDao(db: AlAzharTexDatabase): CutLogDao = db.cutLogDao()
+
+    @Provides
+    fun providePriceTierDao(db: AlAzharTexDatabase): PriceTierDao = db.priceTierDao()
 }
 
-/**
- * Hilt binding associating the Room-backed [RoomShadeCartStore] with [ShadeCartStore]
- * (Pyre, Chapter 10.2).
- */
 @Module
 @InstallIn(SingletonComponent::class)
 abstract class StoreBindingsModule {

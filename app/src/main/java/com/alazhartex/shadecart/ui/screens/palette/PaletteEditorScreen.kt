@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Add
 import androidx.compose.material.icons.rounded.ArrowDownward
@@ -57,11 +58,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
@@ -70,7 +74,9 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alazhartex.shadecart.domain.model.SwatchInput
 import com.alazhartex.shadecart.domain.model.ThemeSettings
 import com.alazhartex.shadecart.domain.validation.HexColorValidator
+import com.alazhartex.shadecart.ui.components.ColorBlindPatternDot
 import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
+import java.util.Locale
 
 private val PresetTextileColors = listOf(
     "Navy" to "#102A71",
@@ -82,11 +88,6 @@ private val PresetTextileColors = listOf(
     "Charcoal" to "#383E4A",
 )
 
-/**
- * Stateful route composable collecting [PaletteEditorViewModel.uiState] via
- * `collectAsStateWithLifecycle` and delegating rendering to stateless [PaletteEditorScreen]
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
- */
 @Composable
 fun PaletteEditorRoute(
     onSavedNavigateToCart: (String) -> Unit,
@@ -101,6 +102,7 @@ fun PaletteEditorRoute(
         onStartEditingSwatch = viewModel::startEditingSwatch,
         onSwatchNumberChanged = viewModel::onSwatchNumberChanged,
         onColorNameChanged = viewModel::onColorNameChanged,
+        onPriceChanged = viewModel::onPriceChanged,
         onHexInputChanged = viewModel::onHexInputChanged,
         onRollSelected = viewModel::onRollSelected,
         onApplyColorEditor = { viewModel.applyColorEditor() },
@@ -111,11 +113,6 @@ fun PaletteEditorRoute(
     )
 }
 
-/**
- * Pure stateless UI screen for manual HEX color editing, preset swatch selection, roll linking,
- * drag/reorder gestures (with stable `LazyColumn` keys), and saving
- * (Pyre, Chapter 1.2, 4.4, 11.1, & 11.4).
- */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun PaletteEditorScreen(
@@ -131,7 +128,9 @@ fun PaletteEditorScreen(
     onDeleteSwatch: (String) -> Unit,
     onSavePalette: () -> Unit,
     modifier: Modifier = Modifier,
+    onPriceChanged: (String) -> Unit = {},
 ) {
+    val haptic = LocalHapticFeedback.current
     var draggedIndex by remember { mutableIntStateOf(-1) }
     var dragAccumulatedY by remember { mutableFloatStateOf(0f) }
     val rowSwapThresholdPx = with(LocalDensity.current) { 64.dp.toPx() }
@@ -194,15 +193,23 @@ fun PaletteEditorScreen(
                                 label = { Text("Swatch #") },
                                 singleLine = true,
                                 modifier = Modifier
-                                    .width(110.dp)
+                                    .width(96.dp)
                                     .testTag("swatch_number_input"),
                             )
                             OutlinedTextField(
                                 value = uiState.colorNameInput,
                                 onValueChange = onColorNameChanged,
-                                label = { Text("Color Name (optional)") },
+                                label = { Text("Color Name") },
                                 singleLine = true,
                                 modifier = Modifier.weight(1f),
+                            )
+                            OutlinedTextField(
+                                value = uiState.priceInput,
+                                onValueChange = onPriceChanged,
+                                label = { Text("EGP/m") },
+                                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
+                                singleLine = true,
+                                modifier = Modifier.width(92.dp),
                             )
                         }
 
@@ -225,8 +232,11 @@ fun PaletteEditorScreen(
                                             modifier = Modifier.testTag("hex_error_text"),
                                         )
                                     } else {
+                                        val labStr = uiState.liveLab?.let { (l, a, b) ->
+                                            " · L*${String.format(Locale.US, "%.0f", l)} a*${String.format(Locale.US, "%.0f", a)} b*${String.format(Locale.US, "%.0f", b)}"
+                                        }.orEmpty()
                                         Text(
-                                            text = "Valid · ${HexColorValidator.normalizeToSixDigitHex(uiState.hexInput)}",
+                                            text = "Valid · ${HexColorValidator.normalizeToSixDigitHex(uiState.hexInput)}$labStr",
                                             fontFamily = FontFamily.Monospace,
                                         )
                                     }
@@ -277,6 +287,20 @@ fun PaletteEditorScreen(
                             }
                         }
 
+                        uiState.duplicateWarning?.let { warn ->
+                            Surface(
+                                color = MaterialTheme.colorScheme.tertiaryContainer,
+                                shape = MaterialTheme.shapes.small,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Text(
+                                    text = "Similar shade (ΔE ${String.format(Locale.US, "%.2f", warn.deltaE)}) in ${warn.existingCartName} #${warn.existingSwatchNumber}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    modifier = Modifier.padding(8.dp),
+                                )
+                            }
+                        }
+
                         FlowRow(
                             horizontalArrangement = Arrangement.spacedBy(6.dp),
                             verticalArrangement = Arrangement.spacedBy(6.dp),
@@ -311,7 +335,7 @@ fun PaletteEditorScreen(
                             ) {
                                 Text(
                                     text = linkedRoll?.let {
-                                        "Linked Roll: ${it.rollCode} (${it.warehouseShed} · ${it.lengthMeters.toInt()}m)"
+                                        "Linked Roll: ${it.rollCode} (${it.warehouseShed} · ${it.availableMeters.toInt()}m)"
                                     } ?: "Optional Roll Link: None",
                                 )
                             }
@@ -339,7 +363,10 @@ fun PaletteEditorScreen(
                         }
 
                         Button(
-                            onClick = onApplyColorEditor,
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                onApplyColorEditor()
+                            },
                             enabled = uiState.isHexValid && uiState.swatchNumberInput.isNotBlank(),
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -379,7 +406,6 @@ fun PaletteEditorScreen(
 
             itemsIndexed(uiState.swatches, key = { _, sw -> sw.id }) { index, sw ->
                 val isDragging = draggedIndex == index
-                val argb = HexColorValidator.parseArgbOrNull(sw.colorHex) ?: 0xFF334155.toInt()
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -437,6 +463,7 @@ fun PaletteEditorScreen(
                                                     draggedIndex < uiState.swatches.lastIndex
                                                 ) {
                                                     val next = draggedIndex + 1
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     onMoveSwatch(draggedIndex, next)
                                                     draggedIndex = next
                                                     dragAccumulatedY = 0f
@@ -444,6 +471,7 @@ fun PaletteEditorScreen(
                                                     draggedIndex > 0
                                                 ) {
                                                     val prev = draggedIndex - 1
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                                                     onMoveSwatch(draggedIndex, prev)
                                                     draggedIndex = prev
                                                     dragAccumulatedY = 0f
@@ -455,12 +483,10 @@ fun PaletteEditorScreen(
                                 .testTag("drag_handle_${sw.swatchNumber}"),
                         )
 
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color(argb))
-                                .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+                        ColorBlindPatternDot(
+                            colorHex = sw.colorHex,
+                            patternSeed = index,
+                            modifier = Modifier.size(34.dp),
                         )
 
                         Spacer(modifier = Modifier.width(10.dp))
@@ -472,7 +498,7 @@ fun PaletteEditorScreen(
                                 fontWeight = FontWeight.SemiBold,
                             )
                             Text(
-                                text = sw.colorHex,
+                                text = sw.colorHex + (sw.pricePerMeter?.let { " · ${String.format(Locale.US, "%.1f", it)} ${sw.currencyCode}/m" } ?: ""),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontFamily = FontFamily.Monospace,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,

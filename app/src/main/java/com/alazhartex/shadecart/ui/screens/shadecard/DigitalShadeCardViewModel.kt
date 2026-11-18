@@ -8,12 +8,16 @@ import com.alazhartex.shadecart.domain.imaging.BitmapProcessor
 import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
 import com.alazhartex.shadecart.domain.model.ShadeCartModel
 import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
+import com.alazhartex.shadecart.domain.model.ShadeConsistencyReport
 import com.alazhartex.shadecart.domain.model.SwatchInput
 import com.alazhartex.shadecart.domain.model.SwatchModel
 import com.alazhartex.shadecart.domain.model.WarehouseRollModel
 import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveAllLotsUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveCalibrationStateUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartsUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveWarehouseRollsUseCase
+import com.alazhartex.shadecart.domain.usecase.ShadeConsistencyUseCase
 import com.alazhartex.shadecart.domain.usecase.UpdateShadeCartSwatchesUseCase
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,27 +28,25 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-/**
- * Immutable presentation state for the Digital Shade Card showcase screen, built exclusively from
- * pure Kotlin domain models (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3 & 10.1).
- */
 data class DigitalShadeCardUiState(
     val carts: List<ShadeCartModel> = emptyList(),
     val selectedCartId: String? = null,
     val activeCart: ShadeCartModel? = null,
     val availableRolls: List<WarehouseRollModel> = emptyList(),
+    val consistencyReport: ShadeConsistencyReport? = null,
+    val isCalibrated: Boolean = false,
+    val activeCalibrationName: String? = null,
     val isLoading: Boolean = true,
 )
 
-/**
- * `@HiltViewModel` backing [DigitalShadeCardRoute], consuming UseCases only and exposing a
- * single reactive `StateFlow` via `stateIn(WhileSubscribed)` (Pyre, Chapter 1.2, 6.3, & 10.1).
- */
 @HiltViewModel
 class DigitalShadeCardViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     observeShadeCarts: ObserveShadeCartsUseCase,
     observeWarehouseRolls: ObserveWarehouseRollsUseCase,
+    observeAllLots: ObserveAllLotsUseCase,
+    observeCalibrationState: ObserveCalibrationStateUseCase,
+    private val shadeConsistencyUseCase: ShadeConsistencyUseCase,
     private val createOrGetShadeCart: CreateOrGetShadeCartUseCase,
     private val updateShadeCartSwatches: UpdateShadeCartSwatchesUseCase,
     private val bitmapProcessor: BitmapProcessor,
@@ -60,18 +62,29 @@ class DigitalShadeCardViewModel @Inject constructor(
         observeShadeCarts(),
         selectedCartIdFlow,
         observeWarehouseRolls(null),
-    ) { carts, requestedId, rolls ->
+        observeAllLots(),
+        observeCalibrationState(),
+    ) { carts, requestedId, rolls, lots, calState ->
         val active = carts.firstOrNull { it.id == requestedId } ?: carts.firstOrNull()
         val matchingRolls = if (active?.fabricTypeId != null) {
             rolls.filter { it.fabricTypeId == active.fabricTypeId }
         } else {
             rolls
         }
+        val report = active?.let {
+            shadeConsistencyUseCase.evaluate(cart = it, rolls = rolls, lots = lots)
+        }
+        val activeCal = active?.calibrationProfileId?.let { id ->
+            calState.profiles.firstOrNull { it.id == id }
+        } ?: calState.activeProfile
         DigitalShadeCardUiState(
             carts = carts,
             selectedCartId = active?.id,
             activeCart = active,
             availableRolls = matchingRolls.ifEmpty { rolls },
+            consistencyReport = report,
+            isCalibrated = activeCal != null,
+            activeCalibrationName = activeCal?.name,
             isLoading = false,
         )
     }.stateIn(
@@ -80,17 +93,14 @@ class DigitalShadeCardViewModel @Inject constructor(
         initialValue = DigitalShadeCardUiState(),
     )
 
-    /** Decodes a memory-bounded `RGB_565` thumbnail bitmap off the main thread. */
     suspend fun loadPreviewBitmap(imagePath: String): Bitmap? =
         bitmapProcessor.loadRgb565Preview(imagePath)
 
-    /** Persists the active cart selection in [SavedStateHandle] across configuration changes. */
     fun selectCart(cartId: String) {
         savedStateHandle[KEY_CART_ID] = cartId
         selectedCartIdFlow.value = cartId
     }
 
-    /** Opens the manual Palette Editor on the active cart or provisions a Silk 180 draft first. */
     fun openManualPaletteEditor(onNavigateToPalette: (String) -> Unit) {
         val current = uiState.value.activeCart
         if (current != null) {
@@ -115,7 +125,6 @@ class DigitalShadeCardViewModel @Inject constructor(
         }
     }
 
-    /** Links or unlinks [target] swatch to a warehouse [WarehouseRollModel] with optimistic locking. */
     fun linkSwatchToRoll(target: SwatchModel, rollId: String?) {
         val cart = uiState.value.activeCart ?: return
         viewModelScope.launch {
@@ -133,6 +142,13 @@ class DigitalShadeCardViewModel @Inject constructor(
                     bboxRight = sw.bboxRight,
                     bboxBottom = sw.bboxBottom,
                     isOverridden = sw.isOverridden,
+                    labL = sw.labL,
+                    labA = sw.labA,
+                    labB = sw.labB,
+                    weaveTag = sw.weaveTag,
+                    sheenScore = sw.sheenScore,
+                    pricePerMeter = sw.pricePerMeter,
+                    currencyCode = sw.currencyCode,
                     version = sw.version,
                 )
             }

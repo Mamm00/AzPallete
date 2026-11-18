@@ -10,10 +10,12 @@ import android.content.res.Configuration
 import android.net.Uri
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.compose.CameraXViewfinder
 import androidx.camera.core.CameraSelector
+import androidx.camera.core.ImageAnalysis
 import androidx.camera.core.ImageCapture
 import androidx.camera.core.ImageCaptureException
 import androidx.camera.core.Preview
@@ -36,7 +38,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.AutoAwesomeMotion
+import androidx.compose.material.icons.rounded.BurstMode
 import androidx.compose.material.icons.rounded.CameraAlt
+import androidx.compose.material.icons.rounded.DocumentScanner
 import androidx.compose.material.icons.rounded.PhotoLibrary
 import androidx.compose.material.icons.rounded.Restore
 import androidx.compose.material.icons.rounded.Settings
@@ -56,6 +60,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -74,26 +79,25 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.alazhartex.shadecart.R
+import com.alazhartex.shadecart.domain.imaging.PureImageMath
 import com.alazhartex.shadecart.domain.model.ThemeSettings
+import com.alazhartex.shadecart.ui.components.AmbientLuxChip
+import com.alazhartex.shadecart.ui.components.ShadeLockCalibrationDialog
+import com.alazhartex.shadecart.ui.components.rememberAmbientLux
 import com.alazhartex.shadecart.ui.theme.AlAzharTexTheme
+import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanning
+import com.google.mlkit.vision.documentscanner.GmsDocumentScanningResult
 import kotlinx.coroutines.guava.await
 import java.io.File
 import java.util.concurrent.Executors
 
-/**
- * Runtime camera permission states governing viewfinder vs rationale / settings deep-link UI.
- */
 enum class CameraPermissionStatus {
     GRANTED,
     DENIED_SHOW_RATIONALE,
     PERMANENTLY_DENIED,
 }
 
-/**
- * Stateful route composable collecting [CartCaptureViewModel.uiState], binding Android runtime
- * permission + Photo Picker activity-result launchers, and delegating rendering to stateless
- * [CartCaptureScreen] (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2 & 6.3).
- */
 @Composable
 fun CartCaptureRoute(
     onImageReadyForEdit: (String) -> Unit,
@@ -105,6 +109,8 @@ fun CartCaptureRoute(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
+    val ambientLux = rememberAmbientLux()
+    var showCalibrationDialog by remember { mutableStateOf(false) }
 
     var systemGranted by remember {
         mutableStateOf(
@@ -124,6 +130,18 @@ fun CartCaptureRoute(
     ) { uri ->
         if (uri != null) {
             viewModel.onGalleryPhotoPicked(uri, onImageReadyForEdit)
+        }
+    }
+
+    val docScannerLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartIntentSenderForResult(),
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            val scanResult = GmsDocumentScanningResult.fromActivityResultIntent(result.data)
+            val uri = scanResult?.pages?.firstOrNull()?.imageUri
+            if (uri != null) {
+                viewModel.onGalleryPhotoPicked(uri, onImageReadyForEdit)
+            }
         }
     }
 
@@ -148,6 +166,7 @@ fun CartCaptureRoute(
     CartCaptureScreen(
         uiState = uiState,
         permissionStatus = effectivePermissionStatus,
+        ambientLux = ambientLux,
         onRequestCameraPermission = {
             viewModel.markCameraPermissionRequested()
             permissionLauncher.launch(Manifest.permission.CAMERA)
@@ -155,7 +174,30 @@ fun CartCaptureRoute(
         onOpenAppSettings = openAppSettings,
         onPrepareTempCaptureFile = viewModel::prepareTempCaptureFile,
         onPhotoCaptured = { file -> viewModel.onPhotoCaptured(file, onImageReadyForEdit) },
+        onBurstCaptured = { files -> viewModel.onBurstCaptured(files, onImageReadyForEdit) },
+        onFocusScoreUpdated = viewModel::updateLiveFocusScore,
+        onOpenCalibration = { showCalibrationDialog = true },
         onCaptureError = viewModel::onCaptureError,
+        onLaunchDocumentScanner = {
+            if (activity != null) {
+                val options = GmsDocumentScannerOptions.Builder()
+                    .setGalleryImportAllowed(true)
+                    .setPageLimit(1)
+                    .setResultFormats(GmsDocumentScannerOptions.RESULT_FORMAT_JPEG)
+                    .setScannerMode(GmsDocumentScannerOptions.SCANNER_MODE_FULL)
+                    .build()
+                GmsDocumentScanning.getClient(options)
+                    .getStartScanIntent(activity)
+                    .addOnSuccessListener { intentSender ->
+                        docScannerLauncher.launch(IntentSenderRequest.Builder(intentSender).build())
+                    }
+                    .addOnFailureListener { exc ->
+                        viewModel.onCaptureError(
+                            "Document scanner unavailable (${exc.message ?: "use gallery or camera"}).",
+                        )
+                    }
+            }
+        },
         onPickGalleryPhoto = {
             photoPickerLauncher.launch(
                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
@@ -166,13 +208,20 @@ fun CartCaptureRoute(
         onDiscardRestorableCapture = viewModel::discardRestorableCapture,
         modifier = modifier,
     )
+
+    if (showCalibrationDialog) {
+        ShadeLockCalibrationDialog(
+            profiles = uiState.calibrationState.profiles,
+            activeProfileId = uiState.calibrationState.activeProfileId,
+            currentAmbientLux = ambientLux,
+            onSelectProfile = viewModel::selectCalibration,
+            onDeleteProfile = viewModel::deleteCalibration,
+            onSaveNewProfile = viewModel::saveCalibration,
+            onDismiss = { showCalibrationDialog = false },
+        )
+    }
 }
 
-/**
- * Pure stateless UI screen presenting process-death capture recovery, CameraX Compose viewfinder,
- * permission rationale/settings fallback cards, gallery Photo Picker trigger, and bundled sample A4
- * shade cart loader (Pyre, Chapter 1.2, 4.4, & 11.4).
- */
 @Composable
 fun CartCaptureScreen(
     uiState: CartCaptureUiState,
@@ -187,13 +236,45 @@ fun CartCaptureScreen(
     onResumePendingCapture: () -> Unit,
     onDiscardRestorableCapture: () -> Unit,
     modifier: Modifier = Modifier,
+    ambientLux: Float = -1f,
+    onBurstCaptured: (List<File>) -> Unit = {},
+    onFocusScoreUpdated: (Float) -> Unit = {},
+    onOpenCalibration: () -> Unit = {},
+    onLaunchDocumentScanner: () -> Unit = {},
 ) {
     Column(
         modifier = modifier
             .fillMaxSize()
             .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
+        // A1: ShadeLock calibration status & ambient light coach row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            AmbientLuxChip(
+                lux = ambientLux,
+                activeProfileName = uiState.calibrationState.activeProfile?.name,
+                onClick = onOpenCalibration,
+            )
+            uiState.liveFocusScore?.let { score ->
+                Surface(
+                    shape = MaterialTheme.shapes.small,
+                    color = if (score > 14f) MaterialTheme.colorScheme.primaryContainer
+                    else MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Text(
+                        text = if (score > 14f) "Focus: Crisp" else "Hold steady",
+                        style = MaterialTheme.typography.labelSmall,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                    )
+                }
+            }
+        }
+
         uiState.restorableCapturePath?.let {
             Card(
                 colors = CardDefaults.cardColors(
@@ -229,12 +310,8 @@ fun CartCaptureScreen(
                         }
                     }
                     Row {
-                        TextButton(onClick = onDiscardRestorableCapture) {
-                            Text("Discard")
-                        }
-                        Button(onClick = onResumePendingCapture) {
-                            Text("Resume")
-                        }
+                        TextButton(onClick = onDiscardRestorableCapture) { Text("Discard") }
+                        Button(onClick = onResumePendingCapture) { Text("Resume") }
                     }
                 }
             }
@@ -265,6 +342,7 @@ fun CartCaptureScreen(
                 CameraPermissionStatus.GRANTED -> {
                     CameraCapturePreviewBox(
                         isBusy = uiState.isBusy,
+                        onFocusScore = onFocusScoreUpdated,
                         onCaptureClick = { imageCapture, executor ->
                             val tempFile = onPrepareTempCaptureFile()
                             val options = ImageCapture.OutputFileOptions.Builder(tempFile).build()
@@ -277,11 +355,18 @@ fun CartCaptureScreen(
                                     }
 
                                     override fun onError(exception: ImageCaptureException) {
-                                        onCaptureError(
-                                            exception.message ?: "Camera capture error",
-                                        )
+                                        onCaptureError(exception.message ?: "Camera capture error")
                                     }
                                 },
+                            )
+                        },
+                        onBurstClick = { imageCapture, executor ->
+                            captureThreeFrameBurst(
+                                imageCapture = imageCapture,
+                                executor = executor,
+                                prepareFile = onPrepareTempCaptureFile,
+                                onComplete = onBurstCaptured,
+                                onError = onCaptureError,
                             )
                         },
                         onCameraError = onCaptureError,
@@ -321,7 +406,7 @@ fun CartCaptureScreen(
                         CircularProgressIndicator(color = Color.White)
                         Spacer(modifier = Modifier.height(10.dp))
                         Text(
-                            text = "Downsampling to <=2048px...",
+                            text = uiState.busyMessage,
                             color = Color.White,
                             style = MaterialTheme.typography.bodyMedium,
                         )
@@ -332,7 +417,7 @@ fun CartCaptureScreen(
 
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             FilledTonalButton(
                 onClick = onPickGalleryPhoto,
@@ -347,30 +432,77 @@ fun CartCaptureScreen(
             }
 
             OutlinedButton(
-                onClick = onLoadSampleCart,
+                onClick = onLaunchDocumentScanner,
                 enabled = !uiState.isBusy,
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("load_sample_cart_button"),
+                modifier = Modifier.weight(1f),
             ) {
-                Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(stringResource(R.string.load_sample_cart))
+                Text("Doc Scan")
             }
         }
+
+        OutlinedButton(
+            onClick = onLoadSampleCart,
+            enabled = !uiState.isBusy,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("load_sample_cart_button"),
+        ) {
+            Icon(Icons.Rounded.AutoAwesomeMotion, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(stringResource(R.string.load_sample_cart))
+        }
     }
+}
+
+private fun captureThreeFrameBurst(
+    imageCapture: ImageCapture,
+    executor: java.util.concurrent.ExecutorService,
+    prepareFile: () -> File,
+    onComplete: (List<File>) -> Unit,
+    onError: (String) -> Unit,
+) {
+    val captured = mutableListOf<File>()
+    fun takeNext(remaining: Int) {
+        if (remaining <= 0) {
+            onComplete(captured)
+            return
+        }
+        val f = prepareFile()
+        val opts = ImageCapture.OutputFileOptions.Builder(f).build()
+        imageCapture.takePicture(
+            opts,
+            executor,
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    captured.add(f)
+                    takeNext(remaining - 1)
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    if (captured.isNotEmpty()) onComplete(captured)
+                    else onError(exception.message ?: "Burst capture error")
+                }
+            },
+        )
+    }
+    takeNext(3)
 }
 
 @Composable
 private fun CameraCapturePreviewBox(
     isBusy: Boolean,
+    onFocusScore: (Float) -> Unit,
     onCaptureClick: (ImageCapture, java.util.concurrent.ExecutorService) -> Unit,
+    onBurstClick: (ImageCapture, java.util.concurrent.ExecutorService) -> Unit,
     onCameraError: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val cameraExecutor = remember { Executors.newSingleThreadExecutor() }
     var surfaceRequest by remember { mutableStateOf<SurfaceRequest?>(null) }
+    var lastAnalyzedMs by remember { mutableLongStateOf(0L) }
 
     val imageCapture = remember {
         ImageCapture.Builder()
@@ -384,12 +516,38 @@ private fun CameraCapturePreviewBox(
             val preview = Preview.Builder().build().apply {
                 setSurfaceProvider { req -> surfaceRequest = req }
             }
+            val analysis = ImageAnalysis.Builder()
+                .setBackpressureStrategy(ImageAnalysis.STRATEGY_KEEP_ONLY_LATEST)
+                .build()
+                .apply {
+                    setAnalyzer(cameraExecutor) { proxy ->
+                        val now = System.currentTimeMillis()
+                        if (now - lastAnalyzedMs >= 600L) {
+                            lastAnalyzedMs = now
+                            val plane = proxy.planes.firstOrNull()
+                            if (plane != null) {
+                                val buffer = plane.buffer
+                                val bytes = ByteArray(buffer.remaining())
+                                buffer.get(bytes)
+                                val luma = IntArray(bytes.size) { bytes[it].toInt() and 0xFF }
+                                val score = PureImageMath.laplacianFocusScore(
+                                    luma = luma,
+                                    width = plane.rowStride.coerceAtLeast(1),
+                                    height = (luma.size / plane.rowStride.coerceAtLeast(1)).coerceAtLeast(1),
+                                )
+                                onFocusScore(score)
+                            }
+                        }
+                        proxy.close()
+                    }
+                }
             cameraProvider.unbindAll()
             cameraProvider.bindToLifecycle(
                 lifecycleOwner,
                 CameraSelector.DEFAULT_BACK_CAMERA,
                 preview,
                 imageCapture,
+                analysis,
             )
         }.onFailure { err ->
             onCameraError("Camera preview unavailable (${err.message ?: "emulator/no hardware"}). Use Upload Photo or Load Sample A4 Cart.")
@@ -439,24 +597,43 @@ private fun CameraCapturePreviewBox(
                 shape = RoundedCornerShape(16.dp),
             ) {}
 
-            FloatingActionButton(
-                onClick = {
-                    if (!isBusy) {
-                        onCaptureClick(imageCapture, cameraExecutor)
-                    }
-                },
-                shape = CircleShape,
+            Row(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
-                    .padding(bottom = 18.dp)
-                    .size(68.dp)
-                    .testTag("capture_shutter_button"),
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.CameraAlt,
-                    contentDescription = "Capture A4 Shade Cart",
-                    modifier = Modifier.size(30.dp),
-                )
+                FloatingActionButton(
+                    onClick = {
+                        if (!isBusy) onCaptureClick(imageCapture, cameraExecutor)
+                    },
+                    shape = CircleShape,
+                    modifier = Modifier
+                        .size(66.dp)
+                        .testTag("capture_shutter_button"),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.CameraAlt,
+                        contentDescription = "Capture A4 Shade Cart",
+                        modifier = Modifier.size(30.dp),
+                    )
+                }
+
+                FloatingActionButton(
+                    onClick = {
+                        if (!isBusy) onBurstClick(imageCapture, cameraExecutor)
+                    },
+                    shape = CircleShape,
+                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                    modifier = Modifier.size(50.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.BurstMode,
+                        contentDescription = "3-Frame HDR Burst Capture",
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
         }
     }

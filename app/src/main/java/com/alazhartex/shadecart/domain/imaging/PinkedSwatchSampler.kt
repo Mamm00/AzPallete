@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import android.graphics.Color
 import androidx.palette.graphics.Palette
 import com.alazhartex.shadecart.data.model.NormalizedRect
+import com.alazhartex.shadecart.domain.model.CalibrationProfile
+import com.alazhartex.shadecart.domain.model.WeaveTag
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,9 +17,9 @@ import kotlin.math.roundToInt
 /**
  * Extracts accurate dominant fabric colors from physical swatches with zigzag/pinked scissors edges.
  *
- * To avoid counting pinked teeth, drop shadows, or white cardstock paper behind notches,
- * sampling always insets inward by [PINKED_EDGE_INSET_FRACTION] (18% per side) and filters
- * paper-like near-white background pixels before invoking AndroidX [Palette].
+ * Insets inward by [PINKED_EDGE_INSET_FRACTION] (18% per side), filters near-white paper glare,
+ * optionally applies a [CalibrationProfile] white-balance correction, computes CIE L*a*b* coordinates
+ * via [ColorScience], and estimates weave/sheen texture via [PureImageMath].
  */
 class PinkedSwatchSampler(
     private val defaultDispatcher: CoroutineDispatcher = Dispatchers.Default,
@@ -38,10 +40,6 @@ class PinkedSwatchSampler(
             return NormalizedRect(left = left, top = top, right = right, bottom = bottom)
         }
 
-        /**
-         * Pure-JVM fallback color estimator used when Palette quantization drops uniform or very dark
-         * fabrics, and verified directly in unit tests against noisy pinked border contamination.
-         */
         fun computeFilteredMedianArgb(
             pixels: IntArray,
             excludePaperNearWhite: Boolean = true,
@@ -59,7 +57,6 @@ class PinkedSwatchSampler(
                 val minCh = min(r, min(g, b))
                 val chroma = maxCh - minCh
                 val luma = (0.299 * r + 0.587 * g + 0.114 * b)
-                // Skip paper margins (very bright low-chroma pixels) unless the entire region is white fabric
                 if (excludePaperNearWhite && luma > 234.0 && chroma < 18) {
                     continue
                 }
@@ -69,7 +66,6 @@ class PinkedSwatchSampler(
             }
 
             if (candidateR.isEmpty()) {
-                // Entire swatch genuinely is bright ivory/white fabric
                 for (px in pixels) {
                     candidateR.add((px ushr 16) and 0xFF)
                     candidateG.add((px ushr 8) and 0xFF)
@@ -90,7 +86,7 @@ class PinkedSwatchSampler(
         fun formatHex(argb: Int): String =
             String.format("#%06X", argb and 0xFFFFFF)
 
-        fun describeTextileColor(argb: Int): String {
+        fun describeTextileColor(argb: Int, arabic: Boolean = false): String {
             val r = (argb ushr 16) and 0xFF
             val g = (argb ushr 8) and 0xFF
             val b = argb and 0xFF
@@ -101,21 +97,25 @@ class PinkedSwatchSampler(
 
             if (chroma < 22) {
                 return when {
-                    luma < 45 -> "Jet Black"
-                    luma < 105 -> "Charcoal"
-                    luma < 185 -> "Stone Grey"
-                    else -> "Ivory White"
+                    luma < 45 -> if (arabic) "أسود فاحم" else "Jet Black"
+                    luma < 105 -> if (arabic) "رمادي فحمي" else "Charcoal"
+                    luma < 185 -> if (arabic) "رمادي حجري" else "Stone Grey"
+                    else -> if (arabic) "أبيض ناصع" else "Ivory White"
                 }
             }
 
             return when {
-                r >= g && r >= b && g < 85 && b < 85 -> if (luma < 110) "Burgundy" else "Crimson"
-                r > 165 && g in 95..185 && b < 90 -> if (luma > 160) "Sand Gold" else "Terracotta"
-                r > 190 && g > 175 && b < 110 -> "Ochre Gold"
-                g >= r && g >= b -> if (b > g * 0.72f) "Nile Teal" else "Azhar Emerald"
-                b >= r && b >= g -> if (luma < 85) "Azhar Navy" else "Royal Blue"
-                r > 120 && b > 100 && g < 90 -> "Plum"
-                else -> "Textile Shade"
+                r >= g && r >= b && g < 85 && b < 85 ->
+                    if (luma < 110) (if (arabic) "نبيتي داكن" else "Burgundy") else (if (arabic) "قرمزي" else "Crimson")
+                r > 165 && g in 95..185 && b < 90 ->
+                    if (luma > 160) (if (arabic) "رملي ذهبي" else "Sand Gold") else (if (arabic) "طوبي" else "Terracotta")
+                r > 190 && g > 175 && b < 110 -> if (arabic) "ذهبي مغرة" else "Ochre Gold"
+                g >= r && g >= b ->
+                    if (b > g * 0.72f) (if (arabic) "بترولي نيلي" else "Nile Teal") else (if (arabic) "زمردي الأزهر" else "Azhar Emerald")
+                b >= r && b >= g ->
+                    if (luma < 85) (if (arabic) "كحلي الأزهر" else "Azhar Navy") else (if (arabic) "أزرق ملكي" else "Royal Blue")
+                r > 120 && b > 100 && g < 90 -> if (arabic) "برقوقي" else "Plum"
+                else -> if (arabic) "درجة نسيج" else "Textile Shade"
             }
         }
     }
@@ -124,11 +124,51 @@ class PinkedSwatchSampler(
         val colorHex: String,
         val colorName: String,
         val innerSampleBounds: NormalizedRect,
+        val labL: Double = 0.0,
+        val labA: Double = 0.0,
+        val labB: Double = 0.0,
+        val weaveSuggestion: PureImageMath.WeaveSuggestion = PureImageMath.WeaveSuggestion.COTTON,
+        val weaveTag: WeaveTag = WeaveTag.MATTE,
+        val sheenScore: Float = 0f,
     )
+
+    data class SampledRegionResult(
+        val hexColor: String,
+        val colorName: String,
+        val labL: Double,
+        val labA: Double,
+        val labB: Double,
+        val weaveTag: WeaveTag,
+        val sheenScore: Float,
+    )
+
+    suspend fun sampleRegion(
+        sourceBitmap: Bitmap,
+        swatchBounds: NormalizedRect,
+        calibrationProfile: CalibrationProfile? = null,
+    ): SampledRegionResult? {
+        if (sourceBitmap.width < 16 || sourceBitmap.height < 16) return null
+        val extracted = extractInnerDominantColor(
+            sourceBitmap = sourceBitmap,
+            swatchBounds = swatchBounds,
+            calibrationProfile = calibrationProfile,
+        )
+        return SampledRegionResult(
+            hexColor = extracted.colorHex,
+            colorName = extracted.colorName,
+            labL = extracted.labL,
+            labA = extracted.labA,
+            labB = extracted.labB,
+            weaveTag = extracted.weaveTag,
+            sheenScore = extracted.sheenScore,
+        )
+    }
 
     suspend fun extractInnerDominantColor(
         sourceBitmap: Bitmap,
         swatchBounds: NormalizedRect,
+        calibrationProfile: CalibrationProfile? = null,
+        arabicNames: Boolean = false,
     ): ExtractedSwatchColor = withContext(defaultDispatcher) {
         val innerBounds = computeInnerSampleRegion(swatchBounds)
         val x = (innerBounds.left * sourceBitmap.width).roundToInt().coerceIn(0, sourceBitmap.width - 1)
@@ -139,12 +179,23 @@ class PinkedSwatchSampler(
         val h = (bottom - y).coerceAtLeast(1)
 
         val innerBitmap = Bitmap.createBitmap(sourceBitmap, x, y, w, h)
+        var calibratedBitmap: Bitmap? = null
         try {
-            val pixels = IntArray(w * h)
-            innerBitmap.getPixels(pixels, 0, w, 0, 0, w, h)
+            val rawPixels = IntArray(w * h)
+            innerBitmap.getPixels(rawPixels, 0, w, 0, 0, w, h)
+            val pixels = ColorCalibrator.applyCalibrationToPixels(rawPixels, calibrationProfile)
             val medianRgb = computeFilteredMedianArgb(pixels)
+            val texture = PureImageMath.analyzeWeaveTexture(pixels)
 
-            val palette = Palette.from(innerBitmap)
+            val paletteSource = if (calibrationProfile != null) {
+                Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888).also {
+                    calibratedBitmap = it
+                }
+            } else {
+                innerBitmap
+            }
+
+            val palette = Palette.from(paletteSource)
                 .clearFilters()
                 .maximumColorCount(8)
                 .generate()
@@ -157,7 +208,6 @@ class PinkedSwatchSampler(
                 palette.darkMutedSwatch,
             )
 
-            // Prefer the most populated Palette swatch that is reasonably consistent with inner fabric
             val pickedRgb = candidateSwatches
                 .sortedByDescending { it.population }
                 .firstOrNull { sw ->
@@ -167,15 +217,30 @@ class PinkedSwatchSampler(
                     (dr + dg + db) < 180
                 }?.rgb ?: medianRgb
 
+            val (labL, labA, labB) = ColorScience.argbToLab(pickedRgb)
+            val mappedTag = when (texture.suggestion) {
+                PureImageMath.WeaveSuggestion.SATIN_SILK -> WeaveTag.SATIN
+                PureImageMath.WeaveSuggestion.LINEN_COARSE -> WeaveTag.LINEN
+                PureImageMath.WeaveSuggestion.COTTON ->
+                    if (texture.luminanceVariance > 150.0) WeaveTag.TWILL else WeaveTag.MATTE
+            }
+            val sheenScore = (1f - (texture.luminanceVariance / 300.0).toFloat().coerceIn(0f, 1f))
+                .coerceIn(0f, 1f)
+
             ExtractedSwatchColor(
                 colorHex = formatHex(pickedRgb),
-                colorName = describeTextileColor(pickedRgb),
+                colorName = describeTextileColor(pickedRgb, arabic = arabicNames),
                 innerSampleBounds = innerBounds,
+                labL = labL.toDouble(),
+                labA = labA.toDouble(),
+                labB = labB.toDouble(),
+                weaveSuggestion = texture.suggestion,
+                weaveTag = mappedTag,
+                sheenScore = sheenScore,
             )
         } finally {
-            if (!innerBitmap.isRecycled) {
-                innerBitmap.recycle()
-            }
+            if (!innerBitmap.isRecycled) innerBitmap.recycle()
+            if (calibratedBitmap != null && !calibratedBitmap!!.isRecycled) calibratedBitmap!!.recycle()
         }
     }
 }

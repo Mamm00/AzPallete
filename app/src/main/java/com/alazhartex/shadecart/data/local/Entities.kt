@@ -19,6 +19,13 @@ object RollStatus {
     const val IN_STOCK = "IN_STOCK"
     const val LOW_STOCK = "LOW_STOCK"
     const val RESERVED = "RESERVED"
+    const val OUT_OF_STOCK = "OUT_OF_STOCK"
+}
+
+object ReservationStatus {
+    const val ACTIVE = "ACTIVE"
+    const val RELEASED = "RELEASED"
+    const val FULFILLED = "FULFILLED"
 }
 
 @Entity(
@@ -82,6 +89,15 @@ data class Roll(
     val version: Long = 1L,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long = System.currentTimeMillis(),
+    // Additive v2 columns
+    @ColumnInfo(name = "available_meters", defaultValue = "0.0")
+    val availableMeters: Double = lengthMeters,
+    @ColumnInfo(name = "lot_code", defaultValue = "''")
+    val lotCode: String = "",
+    @ColumnInfo(name = "low_stock_threshold_meters", defaultValue = "50.0")
+    val lowStockThresholdMeters: Double = 50.0,
+    @ColumnInfo(name = "qr_payload", defaultValue = "''")
+    val qrPayload: String = "",
 )
 
 @Entity(
@@ -126,6 +142,15 @@ data class ShadeCartEntity(
     val lastSyncedVersion: Long = 0L,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long = System.currentTimeMillis(),
+    // Additive v2 columns
+    @ColumnInfo(name = "calibration_profile_id")
+    val calibrationProfileId: String? = null,
+    @ColumnInfo(name = "ambient_lux", defaultValue = "-1.0")
+    val ambientLux: Float = -1f,
+    @ColumnInfo(name = "qr_deep_link", defaultValue = "''")
+    val qrDeepLink: String = "",
+    @ColumnInfo(name = "is_archived", defaultValue = "0")
+    val isArchived: Boolean = false,
 )
 
 @Entity(
@@ -188,6 +213,21 @@ data class SwatchEntity(
     val version: Long = 1L,
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long = System.currentTimeMillis(),
+    // Additive v2 columns
+    @ColumnInfo(name = "lab_l", defaultValue = "0.0")
+    val labL: Double = 0.0,
+    @ColumnInfo(name = "lab_a", defaultValue = "0.0")
+    val labA: Double = 0.0,
+    @ColumnInfo(name = "lab_b", defaultValue = "0.0")
+    val labB: Double = 0.0,
+    @ColumnInfo(name = "weave_tag", defaultValue = "'MATTE'")
+    val weaveTag: String = "MATTE",
+    @ColumnInfo(name = "sheen_score", defaultValue = "0.0")
+    val sheenScore: Float = 0f,
+    @ColumnInfo(name = "price_per_meter")
+    val pricePerMeter: Double? = null,
+    @ColumnInfo(name = "currency_code", defaultValue = "'EGP'")
+    val currencyCode: String = "EGP",
 )
 
 @Entity(
@@ -223,6 +263,148 @@ data class SyncQueueEntity(
     val lastError: String? = null,
     @ColumnInfo(name = "created_at")
     val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+/** C2: Dye Lot batch tracking per warehouse roll. */
+@Entity(
+    tableName = "lots",
+    foreignKeys = [
+        ForeignKey(
+            entity = Roll::class,
+            parentColumns = ["id"],
+            childColumns = ["roll_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["roll_id"]),
+        Index(value = ["lot_code"]),
+    ],
+)
+data class DyeLotEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "roll_id")
+    val rollId: String,
+    @ColumnInfo(name = "lot_code")
+    val lotCode: String,
+    @ColumnInfo(name = "dye_date")
+    val dyeDate: Long,
+    @ColumnInfo(name = "master_delta_e")
+    val masterDeltaE: Double,
+    @ColumnInfo(name = "operator_name")
+    val operatorName: String,
+    @ColumnInfo(name = "notes")
+    val notes: String = "",
+    @ColumnInfo(name = "version")
+    val version: Long = 1L,
+    @ColumnInfo(name = "updated_at")
+    val updatedAt: Long = System.currentTimeMillis(),
+)
+
+/** C3: Active/released meterage reservations against warehouse rolls. */
+@Entity(
+    tableName = "reservations",
+    foreignKeys = [
+        ForeignKey(
+            entity = Roll::class,
+            parentColumns = ["id"],
+            childColumns = ["roll_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["roll_id"]),
+        Index(value = ["status"]),
+    ],
+)
+data class ReservationEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "roll_id")
+    val rollId: String,
+    @ColumnInfo(name = "swatch_id")
+    val swatchId: String,
+    @ColumnInfo(name = "meters_reserved")
+    val metersReserved: Double,
+    @ColumnInfo(name = "reserved_by")
+    val reservedBy: String,
+    @ColumnInfo(name = "note")
+    val note: String = "",
+    @ColumnInfo(name = "status")
+    val status: String = ReservationStatus.ACTIVE,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long = System.currentTimeMillis(),
+    @ColumnInfo(name = "expires_at")
+    val expiresAt: Long,
+)
+
+/** C3: Cut-piece audit ledger decrementing live warehouse meters. */
+@Entity(
+    tableName = "cut_log",
+    foreignKeys = [
+        ForeignKey(
+            entity = Roll::class,
+            parentColumns = ["id"],
+            childColumns = ["roll_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["roll_id"]),
+    ],
+)
+data class CutLogEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "roll_id")
+    val rollId: String,
+    @ColumnInfo(name = "swatch_id")
+    val swatchId: String,
+    @ColumnInfo(name = "meters_cut")
+    val metersCut: Double,
+    @ColumnInfo(name = "piece_count")
+    val pieceCount: Int,
+    @ColumnInfo(name = "operator_name")
+    val operatorName: String,
+    @ColumnInfo(name = "created_at")
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
+/** C5c: Volume-based price tiers per fabric type. */
+@Entity(
+    tableName = "price_tiers",
+    foreignKeys = [
+        ForeignKey(
+            entity = FabricType::class,
+            parentColumns = ["id"],
+            childColumns = ["fabric_type_id"],
+            onDelete = ForeignKey.CASCADE,
+        ),
+    ],
+    indices = [
+        Index(value = ["fabric_type_id"]),
+    ],
+)
+data class PriceTierEntity(
+    @PrimaryKey
+    @ColumnInfo(name = "id")
+    val id: String,
+    @ColumnInfo(name = "fabric_type_id")
+    val fabricTypeId: String,
+    @ColumnInfo(name = "tier_name")
+    val tierName: String,
+    @ColumnInfo(name = "min_meters")
+    val minMeters: Double,
+    @ColumnInfo(name = "price_per_meter")
+    val pricePerMeter: Double,
+    @ColumnInfo(name = "currency_code")
+    val currencyCode: String = "EGP",
     @ColumnInfo(name = "updated_at")
     val updatedAt: Long = System.currentTimeMillis(),
 )
