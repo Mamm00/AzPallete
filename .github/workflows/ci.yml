@@ -46,41 +46,29 @@ jobs:
           mapping = pathlib.Path("app/build/outputs/mapping/release/mapping.txt").read_text(errors="replace")
           lines = mapping.splitlines()
 
-          want_orig = {
+          # Check wc0 mapping + SubjectSegmentationRegistrar + TextRegistrar + ComponentRegistrar
+          targets = {
               "com.google.mlkit.vision.segmentation.subject.internal.SubjectSegmentationRegistrar",
               "com.google.mlkit.vision.text.internal.TextRegistrar",
               "com.google.mlkit.vision.common.internal.VisionCommonRegistrar",
-              "com.google.mlkit.common.internal.CommonComponentRegistrar",
-              "com.google.firebase.components.ComponentDiscovery",
-              "com.google.firebase.components.ComponentDiscovery$MetadataRegistrarNameRetriever",
-              "com.google.mlkit.common.internal.MlKitInitProvider",
+              "com.google.firebase.components.ComponentRegistrar",
               "com.google.mlkit.common.sdkinternal.MlKitContext",
           }
-          want_obf = {"it2", "cn7", "ep4", "q32", "wi4"}
           cur_orig = ""
           cur_obf = ""
-          reg_dump = []
-          extra_dump = []
-          cevm_obf = set()
+          out_map = []
           for ln in lines:
               if not ln.startswith(" ") and " -> " in ln and ln.endswith(":"):
                   orig, obf = ln[:-1].split(" -> ", 1)
                   cur_orig, cur_obf = orig.strip(), obf.strip()
-                  if cur_orig in want_orig:
-                      reg_dump.append(f"[{cur_orig}->{cur_obf}]")
-                  if cur_obf in want_obf:
-                      extra_dump.append(f"[{cur_orig}->{cur_obf}]")
-                  if "CartEditViewModel" in cur_orig and "R8$$REMOVED" not in cur_obf:
-                      cevm_obf.add(cur_obf)
-              elif cur_orig in want_orig:
-                  reg_dump.append(ln.strip())
-              elif cur_obf in want_obf:
-                  extra_dump.append(f"{cur_obf}:{ln.strip()}")
+                  if cur_orig in targets or cur_obf in ("wc0", "ft2", "it2"):
+                      out_map.append(f"[{cur_orig}->{cur_obf}]")
+              elif cur_orig in targets or cur_obf in ("wc0",):
+                  out_map.append(ln.strip())
 
-          reg_txt = " | ".join(reg_dump)
-          print(f"::notice::REG_BODY1 {reg_txt[:900]}")
-          print(f"::notice::REG_BODY2 {reg_txt[900:1800]}")
-          print(f"::notice::EXTRA_MAP {' | '.join(extra_dump)[:900]}")
+          mtxt = " | ".join(out_map)
+          print(f"::notice::MAP_SURG1 {mtxt[:900]}")
+          print(f"::notice::MAP_SURG2 {mtxt[900:1800]}")
 
           apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
           sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
@@ -92,24 +80,33 @@ jobs:
                   if name.endswith(".dex"):
                       zf.extract(name, tmp_dex)
 
-          cevm_desc = {f"L{b.replace('.', '/')};" for b in cevm_obf}
           for dex in sorted(tmp_dex.glob("*.dex")):
               out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
               chunks = out.split("Class descriptor  : ")
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
                   if desc == "Lft2;":
+                      idx = ch.find("name          : 'o'")
+                      if idx < 0: idx = ch.find("Virtual methods")
+                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines())
+                      print(f"::notice::FT2_VIRT {txt[:900]}")
+                      print(f"::notice::FT2_VIRT2 {txt[900:1800]}")
+                  if desc == "Lat2;":
                       txt = " | ".join(l.strip() for l in ch.splitlines())
-                      print(f"::notice::FT2_DEX1 {txt[:900]}")
-                      print(f"::notice::FT2_DEX2 {txt[900:1800]}")
-                      print(f"::notice::FT2_DEX3 {txt[1800:2700]}")
-                  if desc == "Lit2;":
-                      txt = " | ".join(l.strip() for l in ch.splitlines()[:60])
-                      print(f"::notice::IT2_DEX {txt[:900]}")
-                  if desc in cevm_desc and "getClass" in ch:
+                      print(f"::notice::AT2_DEX1 {txt[:900]}")
+                      print(f"::notice::AT2_DEX2 {txt[900:1800]}")
+                  if desc == "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;":
+                      txt = " | ".join(l.strip() for l in ch.splitlines())
+                      print(f"::notice::SSR_DEX {txt[:900]}")
+                  if desc == "Lwc0;":
                       mlines = ch.splitlines()
-                      hits = [" // ".join(x.strip() for x in mlines[max(0,i-5):i+5]) for i, ml in enumerate(mlines) if "getClass" in ml]
-                      print(f"::notice::CEVM_GC[{desc}] {' || '.join(hits)[:900]}")
+                      hits = [" // ".join(x.strip() for x in mlines[max(0,i-4):i+3]) for i, ml in enumerate(mlines) if "getClass" in ml]
+                      print(f"::notice::WC0_GCS {' || '.join(hits)[:900]}")
+                  if desc == "Lit2;":
+                      idx = ch.find("name          : 'l'")
+                      if idx >= 0:
+                          txt = " | ".join(l.strip() for l in ch[idx:idx+2500].splitlines())
+                          print(f"::notice::IT2_L {txt[:900]}")
           PYEOF
 
       - name: Annotate compiler errors
