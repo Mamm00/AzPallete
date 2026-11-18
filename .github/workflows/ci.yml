@@ -59,23 +59,27 @@ jobs:
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
                   if desc == "Lq32;":
-                      # find static method 'a'
-                      idx = ch.find("name          : 'a'")
-                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines())
-                      print(f"::notice::Q32_STATIC_A1 {txt[:900]}")
-                      print(f"::notice::Q32_STATIC_A2 {txt[900:1800]}")
-                  if desc in ("Lve3;", "Lav4;", "Ll44;", "Lia3;", "Lse3;"):
-                      mlines = ch.splitlines()
-                      hits = [" // ".join(x.strip() for x in mlines[max(0,i-4):i+4]) for i, ml in enumerate(mlines) if "getClass" in ml]
-                      if hits:
-                          print(f"::notice::GC_CHECK[{desc}] {' || '.join(hits)[:900]}")
+                      idx = ch.find("q32.a:(Landroid/graphics/Bitmap;)Lq32;")
+                      if idx < 0: idx = ch.find("Virtual methods")
+                      txt = " | ".join(l.strip() for l in ch[idx:].splitlines()[:70])
+                      print(f"::notice::Q32_METHOD_A1 {txt[:900]}")
+                      print(f"::notice::Q32_METHOD_A2 {txt[900:1800]}")
                   if desc == "Lft2;":
-                      # print from line 0026 to 006f of invokeSuspend
-                      idx = ch.find("0026:")
-                      if idx >= 0:
-                          txt = " | ".join(l.strip() for l in ch[idx:idx+4000].splitlines())
-                          print(f"::notice::FT2_BODY1 {txt[:900]}")
-                          print(f"::notice::FT2_BODY2 {txt[900:1800]}")
+                      idx = ch.find("ft2.invokeSuspend:")
+                      sub = ch[idx:]
+                      # print from 003a to end of tries
+                      s_idx = sub.find("003a:")
+                      c_idx = sub.find("catches       :")
+                      print(f"::notice::FT2_3A { ' | '.join(l.strip() for l in sub[s_idx:s_idx+1800].splitlines())[:900]}")
+                      print(f"::notice::FT2_TRIES { ' | '.join(l.strip() for l in sub[c_idx:c_idx+1200].splitlines())[:900]}")
+                  if desc == "Lwc0;":
+                      # check all invoke-virtual/static calls in wc0.invokeSuspend
+                      idx = ch.find("wc0.invokeSuspend:")
+                      sub = ch[idx:]
+                      mlines = sub.splitlines()
+                      gcs = [" // ".join(x.strip() for x in mlines[max(0,i-3):i+2]) for i, ml in enumerate(mlines) if "getClass" in ml]
+                      print(f"::notice::WC0_ALL_GC {' || '.join(gcs)[:900]}")
+                      print(f"::notice::WC0_ALL_GC2 {' || '.join(gcs)[900:1800]}")
           PYEOF
 
       - name: Annotate compiler errors
