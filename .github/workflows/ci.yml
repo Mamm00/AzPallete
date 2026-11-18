@@ -46,41 +46,42 @@ jobs:
           mapping = pathlib.Path("app/build/outputs/mapping/release/mapping.txt").read_text(errors="replace")
           lines = mapping.splitlines()
 
-          # 1. Check Registrars, MlKitInitProvider, MlKitContext, ComponentDiscovery, InputImage, CartEditViewModel
+          # 1. Check ALL Registrars and ComponentDiscovery/Runtime/MlKitInitProvider
           regs = []
-          ctx_cls = []
-          ft2_map = []
           cur_orig = ""
           cur_obf = ""
+          capture_cls = {"com.google.mlkit.vision.segmentation.subject.internal.SubjectSegmentationRegistrar",
+                         "com.google.mlkit.vision.text.internal.TextRegistrar",
+                         "com.google.mlkit.vision.common.internal.VisionCommonRegistrar",
+                         "com.google.mlkit.common.internal.MlKitInitProvider",
+                         "com.google.firebase.components.ComponentDiscovery",
+                         "com.google.firebase.components.ComponentRuntime"}
+          cls_details = []
           for ln in lines:
               if not ln.startswith(" ") and " -> " in ln and ln.endswith(":"):
                   orig, obf = ln[:-1].split(" -> ", 1)
                   cur_orig, cur_obf = orig.strip(), obf.strip()
-                  if any(k in cur_orig for k in ("Registrar", "MlKitInitProvider", "MlKitContext", "ComponentDiscovery", "ComponentRuntime", "InputImage")):
+                  if "Registrar" in cur_orig or "MlKitInitProvider" in cur_orig or "MlKitContext" in cur_orig:
                       regs.append(f"{cur_orig}->{cur_obf}")
-                  if cur_obf in ("ft2", "gt2", "et2", "ct2", "q32", "ad0", "bv4", "av4", "at2", "wn1"):
-                      ctx_cls.append(f"{cur_orig}->{cur_obf}")
-              elif cur_obf in ("ft2", "gt2", "at2"):
-                  ft2_map.append(f"{cur_obf}:{ln.strip()}")
+                  if cur_orig in capture_cls:
+                      cls_details.append(f"[{cur_orig}->{cur_obf}]")
+              elif cur_orig in capture_cls and ("<init>" in ln or "getComponents" in ln or "discover" in ln or "zza" in ln):
+                  cls_details.append(ln.strip())
 
-          print(f"::notice::REGS {' | '.join(regs)[:900]}")
-          print(f"::notice::CLASSES {' | '.join(ctx_cls)[:900]}")
-          print(f"::notice::FT2_MAP {' | '.join(ft2_map[:25])[:900]}")
+          print(f"::notice::ALL_REGS {' | '.join(regs)[:900]}")
+          print(f"::notice::CLS_DETAILS {' | '.join(cls_details)[:900]}")
 
-          # 2. Check merged manifest providers, services, meta-data
+          # 2. Check ALL providers and mlkit/firebase elements in merged release manifest
           mf_candidates = list(pathlib.Path("app/build/intermediates").rglob("merged_manifest/**/AndroidManifest.xml"))
           if mf_candidates:
               mf = mf_candidates[0].read_text(errors="replace")
-              interesting = [l.strip() for l in mf.splitlines() if any(k in l for k in ("provider", "service", "ComponentRegistrar", "MlKit", "mlkit", "firebase"))]
-              print(f"::notice::MANIFEST {' | '.join(interesting)[:900]}")
+              idx = mf.find("MlKit")
+              prov_lines = [l.strip() for l in mf.splitlines() if "provider" in l.lower() or "mlkit" in l.lower() or "firebase" in l.lower()]
+              print(f"::notice::MF_PROVIDERS {' | '.join(prov_lines)[:900]}")
+              if len(" | ".join(prov_lines)) > 900:
+                  print(f"::notice::MF_PROVIDERS2 {' | '.join(prov_lines)[900:1800]}")
 
-          # 3. Check aapt_rules.txt and consumer proguard files for mlkit/firebase/gms
-          aapt = list(pathlib.Path("app/build/intermediates").rglob("aapt_rules.txt"))
-          if aapt:
-              alines = [l.strip() for l in aapt[0].read_text(errors="replace").splitlines() if any(k in l.lower() for k in ("mlkit", "firebase", "gms", "registrar"))]
-              print(f"::notice::AAPT_RULES {' | '.join(alines)[:900]}")
-
-          # 4. Disassemble Lwn1;, Lft2;, Lbv4;, Lav4;, Lad0; around a() / invokeSuspend / getClass
+          # 3. Disassemble Lwn1; (around v36), Lft2; (around EVERY getClass), Lbv4;/Lav4;/Lad0; (around EVERY getClass)
           apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
           sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
           dexdump = sorted(pathlib.Path(sdk, "build-tools").glob("*/dexdump"))[-1]
@@ -97,18 +98,18 @@ jobs:
               for ch in chunks[1:]:
                   desc = ch.splitlines()[0].strip().strip("'")
                   if desc == "Lwn1;":
-                      # find where v36 is referenced
                       mlines = ch.splitlines()
-                      hits = [ " // ".join(x.strip() for x in mlines[max(0,i-8):i+6]) for i, ml in enumerate(mlines) if "Lv36;" in ml or "Lrd6;" in ml ]
-                      print(f"::notice::DEX_WN1_V36 {' || '.join(hits)[:900]}")
-                  if desc in ("Lft2;", "Lbv4;", "Lav4;", "Lad0;") and "getClass" in ch:
+                      hits = [ " // ".join(x.strip() for x in mlines[max(0,i-2):i+18]) for i, ml in enumerate(mlines) if "Lv36;" in ml ]
+                      print(f"::notice::WN1_V36_EXACT {' || '.join(hits)[:900]}")
+                  if desc in ("Lft2;", "Lav4;", "Lve3;", "Lq32;"):
                       mlines = ch.splitlines()
                       hits = []
                       for idx, ml in enumerate(mlines):
                           if "getClass" in ml:
-                              ctx = " // ".join(x.strip() for x in mlines[max(0, idx-14):idx+6])
+                              ctx = " // ".join(x.strip() for x in mlines[max(0, idx-5):idx+5])
                               hits.append(ctx)
-                      print(f"::notice::GETCLASS[{desc}] {' || '.join(hits)[:900]}")
+                      if hits:
+                          print(f"::notice::GC[{desc}] {' || '.join(hits)[:900]}")
           PYEOF
 
       - name: Annotate compiler errors
