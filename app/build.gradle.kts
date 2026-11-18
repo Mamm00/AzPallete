@@ -1,3 +1,6 @@
+import org.gradle.api.services.BuildService
+import org.gradle.api.services.BuildServiceParameters
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
@@ -101,6 +104,22 @@ kotlin {
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
     arg("room.incremental", "true")
+}
+
+// Prevent debug/release/test KSP tasks from concurrently writing Room schema JSON under org.gradle.parallel=true.
+abstract class RoomSchemaWriteLock : BuildService<BuildServiceParameters.None>
+
+val roomSchemaLock = gradle.sharedServices.registerIfAbsent(
+    "roomSchemaLock",
+    RoomSchemaWriteLock::class.java,
+) {
+    maxParallelUsages.set(1)
+}
+
+tasks.configureEach {
+    if (name.startsWith("ksp")) {
+        usesService(roomSchemaLock)
+    }
 }
 
 dependencies {
