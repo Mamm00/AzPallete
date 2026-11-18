@@ -530,11 +530,12 @@ private fun CameraCapturePreviewBox(
                                 val bytes = ByteArray(buffer.remaining())
                                 buffer.get(bytes)
                                 val luma = IntArray(bytes.size) { bytes[it].toInt() and 0xFF }
-                                val score = PureImageMath.laplacianFocusScore(
-                                    luma = luma,
-                                    width = plane.rowStride.coerceAtLeast(1),
-                                    height = (luma.size / plane.rowStride.coerceAtLeast(1)).coerceAtLeast(1),
-                                )
+                                val rowStride = plane.rowStride.coerceAtLeast(1)
+                                val score = PureImageMath.computeLaplacianFocusScore(
+                                    lumaGrid = luma,
+                                    width = rowStride,
+                                    height = (luma.size / rowStride).coerceAtLeast(1),
+                                ).toFloat()
                                 onFocusScore(score)
                             }
                         }

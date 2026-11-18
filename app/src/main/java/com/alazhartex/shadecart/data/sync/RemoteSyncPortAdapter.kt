@@ -26,30 +26,36 @@ class RemoteSyncPortAdapter @Inject constructor(
 
     override suspend fun isConnected(): Boolean = syncAdapter.checkConnection()
 
-    override suspend fun pushPacket(packet: RemoteSyncPacket): RemoteSyncPacketResult = mutex.withLock {
-        if (!syncAdapter.checkConnection()) {
-            return@withLock RemoteSyncPacketResult.TransientFailure("Sync adapter offline")
-        }
-        packetLog.add(packet)
-        val cart = packet.cart
-        if (cart != null) {
-            val snapshot = cart.toSnapshot()
-            when (val res = syncAdapter.pushCart(snapshot, maxOf(0L, cart.lastSyncedVersion))) {
-                is SyncPushResult.Accepted ->
-                    RemoteSyncPacketResult.Accepted(res.newRemoteVersion)
-                is SyncPushResult.VersionConflict ->
-                    RemoteSyncPacketResult.Conflict(res.remoteSnapshot.version)
-                is SyncPushResult.TransientFailure ->
-                    RemoteSyncPacketResult.TransientFailure(res.message)
+    override suspend fun pushPacket(packet: RemoteSyncPacket): Result<RemoteSyncPacketResult> =
+        mutex.withLock {
+            runCatching {
+                if (!syncAdapter.checkConnection()) {
+                    return@runCatching RemoteSyncPacketResult.TransientFailure("Sync adapter offline")
+                }
+                packetLog.add(packet)
+                val cart = packet.cart
+                if (cart != null) {
+                    val snapshot = cart.toSnapshot()
+                    when (val res = syncAdapter.pushCart(snapshot, maxOf(0L, cart.lastSyncedVersion))) {
+                        is SyncPushResult.Accepted ->
+                            RemoteSyncPacketResult.Accepted(res.newRemoteVersion)
+                        is SyncPushResult.VersionConflict ->
+                            RemoteSyncPacketResult.Conflict(res.remoteSnapshot.version)
+                        is SyncPushResult.TransientFailure ->
+                            RemoteSyncPacketResult.TransientFailure(res.message)
+                    }
+                } else {
+                    RemoteSyncPacketResult.Accepted(remoteVersion = System.currentTimeMillis())
+                }
             }
-        } else {
-            RemoteSyncPacketResult.Accepted(remoteVersion = System.currentTimeMillis())
         }
-    }
 
-    override suspend fun pullDeltaSince(sinceMillis: Long): List<RemoteSyncPacket> = mutex.withLock {
-        packetLog.filter { it.timestampMillis > sinceMillis }
-    }
+    override suspend fun pullDeltaSince(sinceTimestampMillis: Long): Result<List<RemoteSyncPacket>> =
+        mutex.withLock {
+            runCatching {
+                packetLog.filter { it.timestampMillis > sinceTimestampMillis }
+            }
+        }
 
     private fun ShadeCartModel.toSnapshot(): ShadeCartSnapshot = ShadeCartSnapshot(
         id = id,

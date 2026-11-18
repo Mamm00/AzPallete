@@ -179,10 +179,10 @@ class OfflineEngineTest {
         assertTrue(zipNames.contains("Swatches.json"))
 
         val csv = ShadeCartFormatters.toCsvText(cart)
-        assertTrue(csv.contains("Swatch#,ColorName,HEX,Lab_L,Lab_a,Lab_b"))
+        assertTrue(csv.contains("shade_number,color_name,hex,lab_l,lab_a,lab_b"))
         assertTrue(csv.contains("RL-SLK-005"))
 
-        val whatsapp = ShadeCartFormatters.toWhatsAppSummaryText(cart)
+        val whatsapp = ShadeCartFormatters.toWhatsAppShareCaption(cart)
         assertTrue(whatsapp.contains("\u2066#5 #102A71\u2069"))
         assertTrue(whatsapp.contains("320 m"))
 

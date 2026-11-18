@@ -147,9 +147,9 @@ interface MillInventoryRepositoryContract {
 
 /** E3: Backend readiness remote port implemented by stub & REST adapters. */
 interface RemoteSyncPort {
-    fun isConnected(): Boolean
+    suspend fun isConnected(): Boolean
     suspend fun pushPacket(packet: RemoteSyncPacket): Result<RemoteSyncPacketResult>
-    suspend fun pullDeltaSince(sinceTimestampMillis: Long): Result<List<ShadeCartModel>>
+    suspend fun pullDeltaSince(sinceTimestampMillis: Long): Result<List<RemoteSyncPacket>>
 }
 
 /** A2: Optional BLE spectrophotometer integration hook (Nix Pro 2 class). */

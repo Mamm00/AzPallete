@@ -3,6 +3,7 @@ package com.alazhartex.shadecart
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -67,6 +68,7 @@ class V2FeaturesUiTest {
             }
 
             composeRule.onNodeWithText("Ask & Stats").performClick()
+            composeRule.waitUntilAtLeastOneExists(hasText("Ask AzPallete"), timeoutMillis = 5_000)
             composeRule.onNodeWithText("Ask AzPallete").assertIsDisplayed()
         }
     }
@@ -79,6 +81,7 @@ class V2FeaturesUiTest {
 
             composeRule.waitUntilAtLeastOneExists(hasTestTag("dynamic_color_switch"), timeoutMillis = 5_000)
             composeRule.onNodeWithText("Buyer Mode").performScrollTo().performClick()
+            composeRule.waitUntilAtLeastOneExists(hasText("Lock & Showcase"), timeoutMillis = 5_000)
             composeRule.onNodeWithText("Lock & Showcase").performClick()
 
             // Buyer Showcase screen isolates internal mill tabs
@@ -87,9 +90,11 @@ class V2FeaturesUiTest {
 
             // Wrong PIN rejects unlock
             composeRule.onNodeWithTag("buyer_unlock_pin_button").performClick()
+            composeRule.waitUntilAtLeastOneExists(hasTestTag("buyer_exit_pin_input"), timeoutMillis = 5_000)
             composeRule.onNodeWithTag("buyer_exit_pin_input").performTextReplacement("9999")
             Espresso.closeSoftKeyboard()
             composeRule.onNodeWithTag("buyer_exit_confirm_button").performClick()
+            composeRule.waitUntilAtLeastOneExists(hasText("Incorrect 4-digit PIN."), timeoutMillis = 5_000)
             composeRule.onNodeWithText("Incorrect 4-digit PIN.").assertIsDisplayed()
 
             // Valid default PIN unlocks back to full mill shell

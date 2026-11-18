@@ -143,8 +143,8 @@ class CartCaptureViewModel @Inject constructor(
                 it.copy(isBusy = true, busyMessage = "Stacking 3 burst frames (median HDR)...", errorMessage = null)
             }
             runCatching {
-                val boundedPath = bitmapProcessor.mergeBurstToBoundedOriginal(files.map { it.absolutePath })
-                files.forEach { it.delete() }
+                val boundedPath = bitmapProcessor.mergeThreeFramesMedian(files.map { it.absolutePath })
+                files.forEach { if (it.exists()) it.delete() }
                 savedStateHandle[KEY_TEMP_CAPTURE_PATH] = null
                 savedStateHandle[KEY_RESTORABLE_PATH] = boundedPath
                 boundedPath
