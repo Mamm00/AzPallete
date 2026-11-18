@@ -828,6 +828,7 @@ private fun buildNearbyPermissions(): List<String> = buildList {
         add(Manifest.permission.BLUETOOTH_SCAN)
     }
     if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2) {
+        add(Manifest.permission.ACCESS_COARSE_LOCATION)
         add(Manifest.permission.ACCESS_FINE_LOCATION)
     }
 }
