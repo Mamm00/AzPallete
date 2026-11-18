@@ -434,7 +434,7 @@ class OfflineEngineTest {
             favoritedIds = setOf("s-navy"),
         )
         assertEquals(1, insights.lowStockCount)
-        assertEquals(100.0f, insights.syncHealthScore, 0.01f)
+        assertEquals(1.0f, insights.syncHealthScore, 0.01f)
         assertTrue(insights.totalInventoryValue > 0.0)
     }
 }

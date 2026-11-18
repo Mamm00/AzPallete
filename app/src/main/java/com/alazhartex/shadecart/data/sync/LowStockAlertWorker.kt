@@ -1,6 +1,7 @@
 package com.alazhartex.shadecart.data.sync
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
@@ -38,6 +39,7 @@ class LowStockAlertWorker @AssistedInject constructor(
     private val getLowStockRollsUseCase: GetLowStockRollsUseCase,
 ) : CoroutineWorker(appContext, workerParams) {
 
+    @SuppressLint("MissingPermission")
     override suspend fun doWork(): Result {
         val lowRolls = getLowStockRollsUseCase()
         if (lowRolls.isEmpty()) return Result.success()
