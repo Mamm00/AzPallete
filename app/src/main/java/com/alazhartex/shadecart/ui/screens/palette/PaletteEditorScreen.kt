@@ -173,12 +173,13 @@ fun PaletteEditorScreen(
                                 },
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
                             )
                             if (uiState.editingSwatchId != null) {
                                 OutlinedButton(onClick = onStartNewSwatch) {
                                     Icon(Icons.Rounded.Add, contentDescription = null, modifier = Modifier.size(16.dp))
                                     Spacer(modifier = Modifier.width(4.dp))
-                                    Text("New")
+                                    Text("New", maxLines = 1, softWrap = false)
                                 }
                             }
                         }

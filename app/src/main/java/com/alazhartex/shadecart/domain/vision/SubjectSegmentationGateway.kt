@@ -122,26 +122,46 @@ class MlKitSubjectSegmentationGateway(
             }
         }
 
-        val request = ModuleInstallRequest.newBuilder()
-            .addApi(segmenter)
-            .setListener(listener)
-            .build()
+        val request = runCatching {
+            ModuleInstallRequest.newBuilder()
+                .addApi(segmenter)
+                .setListener(listener)
+                .build()
+        }.getOrElse { exc ->
+            trySend(
+                SegmentationModelState.UnavailableFallback(
+                    exc.message ?: "Unable to initialize ML Kit Subject Segmentation request",
+                ),
+            )
+            close()
+            awaitClose {}
+            return@callbackFlow
+        }
 
-        client.installModules(request)
-            .addOnSuccessListener { response ->
-                if (response.areModulesAlreadyInstalled()) {
-                    trySend(SegmentationModelState.Available)
+        runCatching {
+            client.installModules(request)
+                .addOnSuccessListener { response ->
+                    if (response.areModulesAlreadyInstalled()) {
+                        trySend(SegmentationModelState.Available)
+                        close()
+                    }
+                }
+                .addOnFailureListener { exc ->
+                    trySend(
+                        SegmentationModelState.UnavailableFallback(
+                            exc.message ?: "Unable to download ML Kit Subject Segmentation model",
+                        ),
+                    )
                     close()
                 }
-            }
-            .addOnFailureListener { exc ->
-                trySend(
-                    SegmentationModelState.UnavailableFallback(
-                        exc.message ?: "Unable to download ML Kit Subject Segmentation model",
-                    ),
-                )
-                close()
-            }
+        }.onFailure { exc ->
+            trySend(
+                SegmentationModelState.UnavailableFallback(
+                    exc.message ?: "Unable to download ML Kit Subject Segmentation model",
+                ),
+            )
+            close()
+        }
 
         awaitClose {
             client.unregisterListener(listener)

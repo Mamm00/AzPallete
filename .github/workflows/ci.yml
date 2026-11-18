@@ -30,12 +30,54 @@ jobs:
       - name: Grant execute permissions
         run: chmod +x gradlew tools/ci_gradle_annotate.sh
 
-      - name: Run Unit Tests, Lint & Assemble Debug APK
+      - name: Run Unit Tests, Lint & Assemble Debug/Release APKs
         id: gradle_build
         run: |
           set -o pipefail
-          ./gradlew testDebugUnitTest lintDebug assembleDebug assembleDebugAndroidTest --stacktrace --no-daemon 2>&1 | tee gradle.log
+          ./gradlew testDebugUnitTest lintDebug assembleDebug assembleRelease assembleDebugAndroidTest --stacktrace --no-daemon 2>&1 | tee gradle.log
         continue-on-error: true
+
+      - name: Verify R8 Release Keeps ML Kit ComponentRegistrars
+        if: steps.gradle_build.outcome == 'success'
+        run: |
+          python3 - << 'PYEOF'
+          import os, pathlib, subprocess, zipfile
+
+          apk = sorted(pathlib.Path("app/build/outputs/apk/release").glob("*.apk"))[0]
+          sdk = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or "/usr/local/lib/android/sdk"
+          dexdump = sorted(pathlib.Path(sdk, "build-tools").glob("*/dexdump"))[-1]
+          tmp_dex = pathlib.Path("/tmp/ci_rel_dex")
+          tmp_dex.mkdir(parents=True, exist_ok=True)
+          with zipfile.ZipFile(apk) as zf:
+              for name in zf.namelist():
+                  if name.endswith(".dex"):
+                      zf.extract(name, tmp_dex)
+
+          expected = {
+              "Lcom/google/mlkit/common/internal/CommonComponentRegistrar;",
+              "Lcom/google/mlkit/vision/common/internal/VisionCommonRegistrar;",
+              "Lcom/google/mlkit/vision/text/internal/TextRegistrar;",
+              "Lcom/google/mlkit/vision/segmentation/subject/internal/SubjectSegmentationRegistrar;",
+          }
+          found_init = set()
+          for dex in sorted(tmp_dex.glob("*.dex")):
+              out = subprocess.check_output([str(dexdump), "-d", str(dex)], text=True, errors="replace")
+              for ch in out.split("Class descriptor  : ")[1:]:
+                  desc = ch.splitlines()[0].strip().strip("'")
+                  if desc in expected:
+                      dm = ch[ch.find("Direct methods"):ch.find("Virtual methods")]
+                      vm = ch[ch.find("Virtual methods"):]
+                      if "<init>" not in dm or "getComponents" not in vm:
+                          print(f"::error::R8 stripped constructor or getComponents from {desc}")
+                          raise SystemExit(1)
+                      found_init.add(desc)
+
+          missing = expected - found_init
+          if missing:
+              print(f"::error::Missing ML Kit registrars in release APK: {sorted(missing)}")
+              raise SystemExit(1)
+          print("Verified R8 release APK keeps <init> and getComponents for all ML Kit registrars:", sorted(found_init))
+          PYEOF
 
       - name: Annotate compiler errors
         if: always()

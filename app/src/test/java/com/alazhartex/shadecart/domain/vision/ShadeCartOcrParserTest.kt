@@ -76,4 +76,27 @@ class ShadeCartOcrParserTest {
         assertEquals(145, result.header.widthCm)
         assertTrue(result.numericSwatchLabels.any { it.text == "07" })
     }
+
+    @Test
+    fun `parses physical card ITEM NAME ITEM CODE and unitless WIDTH labels`() {
+        val blocks = listOf(
+            OcrTextBlock(
+                text = "ITEM NAME : Lycra Biscotte",
+                bounds = NormalizedRect(0.05f, 0.06f, 0.45f, 0.10f),
+            ),
+            OcrTextBlock(
+                text = "ITEM CODE : LYC-160",
+                bounds = NormalizedRect(0.05f, 0.11f, 0.45f, 0.14f),
+            ),
+            OcrTextBlock(
+                text = "WEIGHT :   WIDTH : 160",
+                bounds = NormalizedRect(0.05f, 0.15f, 0.75f, 0.18f),
+            ),
+        )
+
+        val result = ShadeCartOcrParser().parse(blocks)
+        assertEquals("Lycra Biscotte", result.header.fabricName)
+        assertEquals("LYC-160", result.header.fabricCode)
+        assertEquals(160, result.header.widthCm)
+    }
 }

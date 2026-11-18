@@ -111,19 +111,28 @@ jobs:
           (cd release-assets && sha256sum "$REL_NAME" "$DBG_NAME" > SHA256SUMS.txt)
 
           TAG="$TAG" REL_NAME="$REL_NAME" DBG_NAME="$DBG_NAME" SIGN_NOTE="$SIGN_NOTE" python3 - << 'PYEOF'
-          import os, textwrap
+          import os, pathlib, re, textwrap
 
           tag = os.environ["TAG"]
           rel_name = os.environ["REL_NAME"]
           dbg_name = os.environ["DBG_NAME"]
           sign_note = os.environ["SIGN_NOTE"]
 
+          gradle_txt = pathlib.Path("app/build.gradle.kts").read_text(encoding="utf-8")
+          vc_match = re.search(r"versionCode\s*=\s*(\d+)", gradle_txt)
+          version_code = vc_match.group(1) if vc_match else "5"
+
           notes = textwrap.dedent(f"""\
           ## Al AzharTex — Digital Shade Cart ({tag})
 
-          Release `{tag}` of the **Al AzharTex Digital Shade Cart** Android application (`com.alazhartex.shadecart`, `versionCode = 4`), digitizing physical A4 fabric shade carts into Room v2 (`MIGRATION_1_2`) inventory records using metric units (**GSM**, **cm**, **m**).
+          Release `{tag}` of the **Al AzharTex Digital Shade Cart** Android application (`com.alazhartex.shadecart`, `versionCode = {version_code}`), digitizing physical A4 fabric shade carts into Room v2 (`MIGRATION_1_2`) inventory records using metric units (**GSM**, **cm**, **m**).
 
-          ### Highlights
+          ### What's Fixed in {tag}
+          - **R8 Release ML Kit Fix (`app/proguard-rules.pro`, `TextRecognitionGateway`, `SubjectSegmentationGateway`)**: Preserved `ComponentRegistrar` constructors (`<init>()`) and `getComponents()` under AGP 9.2.1 R8 full mode so `MlKitInitProvider` properly registers `CommonComponentRegistrar`, `VisionCommonRegistrar`, `TextRegistrar`, and `SubjectSegmentationRegistrar` at startup—eliminating both release-build `NullPointerException` banners on `CartEditScreen` (`InputImage.fromBitmap` / `SubjectSegmentation.getClient`).
+          - **OCR Header Parsing (`ShadeCartOcrParser`)**: Added `ITEM NAME :` and `ITEM CODE :` recognition alongside `FABRIC NAME` / `CODE` for physical shade cart headers.
+          - **Editor Header Layout (`CartEditScreen`)**: Switched the `Non-Destructive Card Editor` and `Header Metadata (OCR)` headers to `FlowRow` with `maxLines = 1, softWrap = false` action labels so `Boxes` and `Crop` never wrap vertically on narrow phones.
+
+          ### Core Capabilities
           - **Color Science & ShadeLock™ Calibration (`ColorScience`, `ColorCalibrator`, `PureImageMath`)**: Pure Kotlin sRGB/XYZ/CIELAB (`D65`) & CIEDE2000 ΔE₂₀₀₀ perceptual delta calculations, 3-frame median HDR burst stacking, flat-field illumination correction, weave texture analysis, live ambient lux monitor, and saved calibration profiles.
           - **Capture, OCR & Non-Destructive Editing (`CartCaptureScreen`, `CartEditScreen`)**: CameraX viewfinder + live Laplacian focus readout, ML Kit Document Scanner / Photo Picker / Sample A4 asset, CanHub `android-image-cropper`, interactive overlay swatch box editor, ML Kit Text Recognition & Subject Segmentation with crop-only fallback, and `EditStack` process-death restoration.
           - **Mill Hub (`InventoryAndMillScreen`)**: Reverse Shade Finder ranked by ΔE₂₀₀₀, Warehouse Rolls & Dye Lots (`RL-*` QR scanning + printable QR label sheet PDF), meter reservations, cut-piece ledger with `LowStockAlertWorker` notifications, volume price tiers, offline **Ask AzPallete** English/Arabic NL queries, and Mill Insights analytics.

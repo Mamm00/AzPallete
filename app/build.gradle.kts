@@ -15,8 +15,8 @@ android {
         applicationId = "com.alazhartex.shadecart"
         minSdk = libs.versions.minSdk.get().toInt()
         targetSdk = libs.versions.targetSdk.get().toInt()
-        versionCode = 4
-        versionName = "2.0.0"
+        versionCode = 5
+        versionName = "2.0.1"
 
         val syncBaseUrl = (System.getenv("ALAZHARTEX_SYNC_BASE_URL") ?: "")
             .replace("\"", "\\\"")

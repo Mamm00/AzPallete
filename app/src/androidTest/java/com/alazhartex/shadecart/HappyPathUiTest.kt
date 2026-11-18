@@ -8,7 +8,7 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
-import androidx.compose.ui.test.onFirst
+import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -24,6 +24,7 @@ import dagger.hilt.android.testing.HiltAndroidRule
 import dagger.hilt.android.testing.HiltAndroidTest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -77,6 +78,26 @@ class HappyPathUiTest {
                     composeRule.onNodeWithTag("save_shade_cart_button").assertIsEnabled()
                 }.isSuccess
             }
+
+            // Ensure neither OCR/MLKit null dereference banner nor squeezed vertical Crop button appears
+            assertTrue(
+                composeRule.onAllNodesWithText("null object reference", substring = true, ignoreCase = true)
+                    .fetchSemanticsNodes().isEmpty(),
+            )
+            assertTrue(
+                composeRule.onAllNodesWithText("OCR/Swatch analysis issue", substring = true)
+                    .fetchSemanticsNodes().isEmpty(),
+            )
+            val boxesBounds = composeRule.onNodeWithTag("toggle_overlay_boxes_button")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            val cropBounds = composeRule.onNodeWithTag("toggle_crop_mode_button")
+                .performScrollTo()
+                .assertIsDisplayed()
+                .fetchSemanticsNode().boundsInRoot
+            assertTrue("Expected Boxes button wider than tall, got $boxesBounds", boxesBounds.width > boxesBounds.height)
+            assertTrue("Expected Crop button wider than tall (not vertically wrapped), got $cropBounds", cropBounds.width > cropBounds.height)
 
             // Fill or confirm metric header values (resilient if offline emulator has no ML Kit OCR model)
             composeRule.onNodeWithTag("ocr_fabric_name_input").performScrollTo().performTextReplacement("Silk 180")

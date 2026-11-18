@@ -44,6 +44,41 @@
 -keepclassmembers class * extends androidx.glance.appwidget.GlanceAppWidgetReceiver {
     public <init>(...);
 }
+-keepclassmembers class * implements androidx.startup.Initializer {
+    public <init>();
+}
+-keepclassmembers class * implements androidx.camera.core.CameraXConfig$Provider {
+    public <init>();
+}
+
+# ML Kit & Firebase Components under R8 full mode:
+# ComponentDiscovery instantiates ComponentRegistrar implementations via Class.forName().getDeclaredConstructor().newInstance(),
+# and older ML Kit/Firebase AAR consumer rules omit `{ <init>(); }`, causing R8 full mode to strip registrar constructors.
+-keep class * implements com.google.firebase.components.ComponentRegistrar {
+    <init>();
+    *;
+}
+-keep interface com.google.firebase.components.ComponentRegistrar {
+    *;
+}
+-keep class com.google.mlkit.common.internal.MlKitInitProvider {
+    <init>();
+    *;
+}
+-keep class com.google.mlkit.common.internal.MlKitComponentDiscoveryService {
+    <init>();
+    *;
+}
+-keep class com.google.mlkit.common.sdkinternal.** { *; }
+-keep class com.google.mlkit.vision.common.internal.** { *; }
+-keep class com.google.mlkit.vision.text.internal.** { *; }
+-keep class com.google.mlkit.vision.segmentation.subject.internal.** { *; }
+-keep class com.google.mlkit.vision.documentscanner.internal.** { *; }
+-keep class com.google.mlkit.vision.codescanner.internal.** { *; }
+-keepclassmembers class * extends com.google.android.gms.common.api.internal.BasePendingResult {
+    com.google.android.gms.common.api.internal.BasePendingResult$ReleasableResultGuardian mResultGuardian;
+}
+
 -dontwarn com.google.zxing.**
 -dontwarn com.google.android.gms.**
 -dontwarn com.google.mlkit.**

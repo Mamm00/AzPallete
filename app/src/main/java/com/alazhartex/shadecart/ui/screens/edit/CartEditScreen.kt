@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -288,37 +289,53 @@ fun CartEditScreen(
             modifier = Modifier.fillMaxWidth(),
         ) {
             Column(modifier = Modifier.padding(12.dp)) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
                 ) {
                     Text(
                         text = "Non-Destructive Card Editor",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterVertically),
                     )
-                    Row {
+                    Row(
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         TextButton(
                             onClick = {
                                 cropEditorActive = false
                                 overlayBoxEditorActive = !overlayBoxEditorActive
                             },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.testTag("toggle_overlay_boxes_button"),
                         ) {
                             Icon(Icons.Rounded.GridOn, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (overlayBoxEditorActive) "Hide Boxes" else "Boxes")
+                            Text(
+                                text = if (overlayBoxEditorActive) "Hide Boxes" else "Boxes",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                         TextButton(
                             onClick = {
                                 overlayBoxEditorActive = false
                                 cropEditorActive = !cropEditorActive
                             },
+                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 4.dp),
                             modifier = Modifier.testTag("toggle_crop_mode_button"),
                         ) {
                             Icon(Icons.Rounded.Crop, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (cropEditorActive) "Done" else "Crop")
+                            Text(
+                                text = if (cropEditorActive) "Done" else "Crop",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
                 }
@@ -459,7 +476,11 @@ fun CartEditScreen(
                         ) {
                             Icon(Icons.Rounded.Check, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text("Apply Crop")
+                            Text(
+                                text = "Apply Crop",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     } else {
                         FilledTonalButton(
@@ -471,7 +492,11 @@ fun CartEditScreen(
                         ) {
                             Icon(Icons.Rounded.AutoFixHigh, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(4.dp))
-                            Text(if (uiState.editStack.backgroundRemoved) "Restore BG" else "Remove BG")
+                            Text(
+                                text = if (uiState.editStack.backgroundRemoved) "Restore BG" else "Remove BG",
+                                maxLines = 1,
+                                softWrap = false,
+                            )
                         }
                     }
 
@@ -512,24 +537,31 @@ fun CartEditScreen(
                 modifier = Modifier.padding(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Row(
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         text = "Header Metadata (OCR)",
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
+                        modifier = Modifier.align(Alignment.CenterVertically),
                     )
                     FilledTonalButton(
                         onClick = onAnalyzeCurrentImage,
                         enabled = !uiState.isProcessingImage,
-                        modifier = Modifier.testTag("analyze_card_button"),
+                        modifier = Modifier
+                            .align(Alignment.CenterVertically)
+                            .testTag("analyze_card_button"),
                     ) {
                         Icon(Icons.Rounded.DocumentScanner, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Detect OCR & Swatches")
+                        Text(
+                            text = "Detect OCR & Swatches",
+                            maxLines = 1,
+                            softWrap = false,
+                        )
                     }
                 }
 
