@@ -2,31 +2,57 @@ package com.alazhartex.shadecart.domain.imaging
 
 import android.graphics.Bitmap
 import com.alazhartex.shadecart.data.model.NormalizedRect
+import com.alazhartex.shadecart.domain.model.CalibrationProfile
+import com.alazhartex.shadecart.domain.model.WeaveTag
 import com.alazhartex.shadecart.domain.vision.OcrTextBlock
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.util.UUID
 import kotlin.math.abs
-import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
 
 data class DetectedSwatchRegion(
+    val id: String = UUID.randomUUID().toString(),
     val swatchNumber: String,
     val colorHex: String,
     val colorName: String,
     val outerBounds: NormalizedRect,
     val innerSampleBounds: NormalizedRect,
     val columnIndex: Int,
+    val labL: Double = 0.0,
+    val labA: Double = 0.0,
+    val labB: Double = 0.0,
+    val weaveSuggestion: PureImageMath.WeaveSuggestion = PureImageMath.WeaveSuggestion.COTTON,
+    val weaveTag: WeaveTag = WeaveTag.MATTE,
+    val sheenScore: Float = 0f,
+    val isManuallyAdded: Boolean = false,
 )
 
 /**
- * Detects physical fabric swatches arranged in an A4 two-column shade cart layout
- * (matching `docs/reference/shade_cart_reference.png`), excludes pinked/zigzag outer
- * margins, extracts dominant HEX colors on [defaultDispatcher], and pairs nearby
- * ML Kit OCR numeric labels (`5`, `7`, `11`, `12`, ...).
+ * Interactive overlay box model used by `SwatchOverlayCanvas` (A4).
+ */
+data class DetectedSwatchBox(
+    val id: String,
+    val rect: NormalizedRect,
+    val colorHex: String,
+    val colorName: String,
+    val label: String,
+    val labL: Double,
+    val labA: Double,
+    val labB: Double,
+    val weaveSuggestion: PureImageMath.WeaveSuggestion,
+    val isManuallyAdded: Boolean = false,
+)
+
+/**
+ * Detects physical fabric swatches arranged in an A4 two-column shade cart layout,
+ * excludes pinked/zigzag outer margins, applies optional calibration profiles, extracts
+ * dominant HEX + CIE Lab colors + weave hints on [defaultDispatcher], and pairs nearby
+ * ML Kit OCR numeric labels.
  */
 class TwoColumnSwatchDetector(
     private val sampler: PinkedSwatchSampler = PinkedSwatchSampler(),
@@ -37,10 +63,6 @@ class TwoColumnSwatchDetector(
         private const val HEADER_CUTOFF_Y = 0.22f
         private const val FOOTER_CUTOFF_Y = 0.96f
 
-        /**
-         * Pairs raw detected bounding boxes (in reading order) with numeric OCR blocks.
-         * Extracted cleanly so JVM unit tests can validate label assignment without Android Bitmaps.
-         */
         fun pairNumericLabels(
             swatchBoxes: List<NormalizedRect>,
             numericLabels: List<OcrTextBlock>,
@@ -51,8 +73,6 @@ class TwoColumnSwatchDetector(
             swatchBoxes.forEachIndexed { idx, box ->
                 val boxCx = (box.left + box.right) / 2f
                 val boxCy = (box.top + box.bottom) / 2f
-
-                // Prefer numeric labels aligned vertically with the swatch in the same column half
                 val sameColumn = boxCx < 0.5f
                 var bestIdx = -1
                 var bestScore = Float.MAX_VALUE
@@ -79,7 +99,6 @@ class TwoColumnSwatchDetector(
                 }
             }
 
-            // Fallback sequential numbers for any unlabeled swatch
             var fallbackCounter = 1
             val used = assigned.filter { it.isNotBlank() }.toMutableSet()
             for (i in assigned.indices) {
@@ -100,6 +119,8 @@ class TwoColumnSwatchDetector(
     suspend fun detectSwatches(
         bitmap: Bitmap,
         numericLabels: List<OcrTextBlock>,
+        calibrationProfile: CalibrationProfile? = null,
+        arabicNames: Boolean = false,
     ): List<DetectedSwatchRegion> = withContext(defaultDispatcher) {
         if (bitmap.width < 40 || bitmap.height < 40) return@withContext emptyList()
 
@@ -124,7 +145,12 @@ class TwoColumnSwatchDetector(
         val labels = pairNumericLabels(sortedBoxes, numericLabels)
 
         sortedBoxes.mapIndexed { idx, bounds ->
-            val extracted = sampler.extractInnerDominantColor(bitmap, bounds)
+            val extracted = sampler.extractInnerDominantColor(
+                sourceBitmap = bitmap,
+                swatchBounds = bounds,
+                calibrationProfile = calibrationProfile,
+                arabicNames = arabicNames,
+            )
             val colIdx = if ((bounds.left + bounds.right) / 2f < 0.5f) 0 else 1
             DetectedSwatchRegion(
                 swatchNumber = labels[idx],
@@ -133,8 +159,39 @@ class TwoColumnSwatchDetector(
                 outerBounds = bounds,
                 innerSampleBounds = extracted.innerSampleBounds,
                 columnIndex = colIdx,
+                labL = extracted.labL,
+                labA = extracted.labA,
+                labB = extracted.labB,
+                weaveSuggestion = extracted.weaveSuggestion,
+                weaveTag = extracted.weaveTag,
+                sheenScore = extracted.sheenScore,
             )
         }
+    }
+
+    suspend fun detectSwatchBoxes(
+        bitmap: Bitmap,
+        numericLabels: List<OcrTextBlock>,
+        calibrationProfile: CalibrationProfile? = null,
+        arabicNames: Boolean = false,
+    ): List<DetectedSwatchBox> = detectSwatches(
+        bitmap = bitmap,
+        numericLabels = numericLabels,
+        calibrationProfile = calibrationProfile,
+        arabicNames = arabicNames,
+    ).map { region ->
+        DetectedSwatchBox(
+            id = region.id,
+            rect = region.outerBounds,
+            colorHex = region.colorHex,
+            colorName = region.colorName,
+            label = region.swatchNumber,
+            labL = region.labL,
+            labA = region.labA,
+            labB = region.labB,
+            weaveSuggestion = region.weaveSuggestion,
+            isManuallyAdded = region.isManuallyAdded,
+        )
     }
 
     private fun findTwoColumnSwatchBoxes(
@@ -204,7 +261,6 @@ class TwoColumnSwatchDetector(
             rowForegroundCount[y] = fg
         }
 
-        // A swatch band has sustained width (>= 22% of column width)
         val minRowPixels = (colWidth * 0.22f).roundToInt().coerceAtLeast(8)
         val minBandHeight = (h * 0.045f).roundToInt().coerceAtLeast(10)
 
@@ -236,7 +292,6 @@ class TwoColumnSwatchDetector(
         val result = mutableListOf<NormalizedRect>()
         for (band in bands) {
             val bandHeight = (band.last - band.first + 1).coerceAtLeast(1)
-            // Compute horizontal extent where foreground density >= 35% of band height
             val minColPixels = (bandHeight * 0.35f).roundToInt().coerceAtLeast(3)
             var leftX = -1
             var rightX = -1
@@ -272,18 +327,15 @@ class TwoColumnSwatchDetector(
         val dist = sqrt(
             ((r - bgR) * (r - bgR) + (g - bgG) * (g - bgG) + (b - bgB) * (b - bgB)).toDouble(),
         )
-        // Exclude light cardstock shadows (grayish/warm near background) and bright paper
         val isDarkShadow = dist < 42.0
         if (isDarkShadow) return false
         val luma = 0.299 * r + 0.587 * g + 0.114 * b
         val bgLuma = 0.299 * bgR + 0.587 * bgG + 0.114 * bgB
-        // Ignore slight paper shading near background brightness if low chroma
         val chroma = max(r, max(g, b)) - min(r, min(g, b))
         return !(chroma < 16 && abs(luma - bgLuma) < 52.0)
     }
 
     private fun estimatePaperBackgroundRgb(pixels: IntArray, w: Int, h: Int): Int {
-        // Sample center gutter and side borders which typically expose physical card paper
         val samplesR = ArrayList<Int>(512)
         val samplesG = ArrayList<Int>(512)
         val samplesB = ArrayList<Int>(512)
@@ -312,7 +364,6 @@ class TwoColumnSwatchDetector(
     }
 
     private fun sortInReadingOrder(boxes: List<NormalizedRect>): List<NormalizedRect> {
-        // Group roughly by row band (within ~6% vertical tolerance), then Left column before Right column
         val sortedByTop = boxes.sortedBy { it.top }
         val rows = mutableListOf<MutableList<NormalizedRect>>()
         for (box in sortedByTop) {

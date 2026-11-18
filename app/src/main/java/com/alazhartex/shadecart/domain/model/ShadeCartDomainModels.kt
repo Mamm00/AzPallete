@@ -1,13 +1,14 @@
 package com.alazhartex.shadecart.domain.model
 
+import kotlinx.serialization.Serializable
 import java.util.UUID
 
 /**
- * Represents the synchronization lifecycle state of a shade cart or queued sync operation.
- *
- * Pure Kotlin domain enum with no Android, Room, or Retrofit dependencies
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 10.1 — Clean Architecture).
+ * Pure Kotlin bidi isolation helper preventing RTL reversal of HEX codes, roll codes, and metric
+ * numbers in Arabic/mixed-script UI and exports (D3).
  */
+fun String.ltrIsolate(): String = "\u2066$this\u2069"
+
 enum class SyncState {
     PENDING,
     SYNCED,
@@ -15,23 +16,26 @@ enum class SyncState {
     FAILED,
 }
 
-/**
- * Represents the inventory stock availability status of a warehouse fabric roll.
- *
- * Framework-independent domain enum (Pyre, Chapter 10.1).
- */
 enum class RollStockStatus {
     IN_STOCK,
     LOW_STOCK,
     RESERVED,
+    OUT_OF_STOCK,
 }
 
-/**
- * Pure Kotlin domain model for a textile fabric specification (e.g., Silk 180, Warsaw L).
- *
- * Kept free of Room `@Entity` or Retrofit serialization annotations so business logic remains
- * portable and JVM-testable (Pyre, Chapter 10.1).
- */
+enum class WeaveTag(val label: String) {
+    MATTE("Matte"),
+    TWILL("Twill"),
+    SATIN("Satin / Silk"),
+    LINEN("Linen"),
+}
+
+enum class ReservationStatusModel {
+    ACTIVE,
+    RELEASED,
+    FULFILLED,
+}
+
 data class FabricTypeModel(
     val id: String,
     val name: String,
@@ -42,11 +46,6 @@ data class FabricTypeModel(
     val updatedAt: Long = 0L,
 )
 
-/**
- * Pure Kotlin domain model representing a physical fabric roll stored in an Al AzharTex warehouse shed.
- *
- * Framework-independent model mapped from local/remote data layers (Pyre, Chapter 10.1).
- */
 data class WarehouseRollModel(
     val id: String,
     val rollCode: String,
@@ -56,18 +55,18 @@ data class WarehouseRollModel(
     val colorHex: String,
     val warehouseShed: String,
     val lengthMeters: Double,
+    val availableMeters: Double = lengthMeters,
+    val lotCode: String = "",
+    val lowStockThresholdMeters: Double = 50.0,
+    val qrPayload: String = "",
     val status: RollStockStatus = RollStockStatus.IN_STOCK,
     val version: Long = 1L,
     val updatedAt: Long = 0L,
-)
+) {
+    val reservedMeters: Double
+        get() = (lengthMeters - availableMeters).coerceAtLeast(0.0)
+}
 
-/**
- * Pure Kotlin domain model for a single color swatch within a shade cart, optionally linked
- * to a [WarehouseRollModel] inventory roll.
- *
- * Decoupled from Room relations so UI and use-case layers remain infrastructure-agnostic
- * (Pyre, Chapter 10.1).
- */
 data class SwatchModel(
     val id: String,
     val shadeCartId: String,
@@ -83,17 +82,17 @@ data class SwatchModel(
     val bboxRight: Float = 0f,
     val bboxBottom: Float = 0f,
     val isOverridden: Boolean = false,
+    val labL: Double = 0.0,
+    val labA: Double = 0.0,
+    val labB: Double = 0.0,
+    val weaveTag: WeaveTag = WeaveTag.MATTE,
+    val sheenScore: Float = 0f,
+    val pricePerMeter: Double? = null,
+    val currencyCode: String = "EGP",
     val version: Long = 1L,
     val updatedAt: Long = 0L,
 )
 
-/**
- * Pure Kotlin aggregate domain model for a Digital Shade Cart card, pairing header specifications
- * with ordered [SwatchModel] items and optional [FabricTypeModel] reference.
- *
- * Replaces direct exposure of Room `ShadeCartWithDetails` in presentation/ViewModel state
- * (Pyre, Chapter 1.2 & Chapter 10.1).
- */
 data class ShadeCartModel(
     val id: String,
     val fabricTypeId: String?,
@@ -106,6 +105,10 @@ data class ShadeCartModel(
     val editedImagePath: String?,
     val editStackJson: String,
     val headerOcrRaw: String = "",
+    val calibrationProfileId: String? = null,
+    val ambientLux: Float = -1f,
+    val qrDeepLink: String = "",
+    val isArchived: Boolean = false,
     val syncStatus: SyncState = SyncState.PENDING,
     val version: Long = 1L,
     val lastSyncedVersion: Long = 0L,
@@ -113,12 +116,6 @@ data class ShadeCartModel(
     val swatches: List<SwatchModel> = emptyList(),
 )
 
-/**
- * Pure Kotlin representation of a pending, synced, or conflicted item in the offline sync queue.
- *
- * Exposed to presentation via use cases so UI sheets never import Room `@Entity` types
- * (Pyre, Chapter 10.1 & Chapter 10.3).
- */
 data class SyncQueueEntryModel(
     val id: String,
     val entityType: String,
@@ -131,32 +128,16 @@ data class SyncQueueEntryModel(
     val updatedAt: Long,
 )
 
-/**
- * Domain classification of how an optimistic-locking version conflict originated.
- *
- * (Pyre, Chapter 10.1 — Clean Architecture domain abstractions).
- */
 enum class ConflictOrigin {
     CONCURRENT_LOCAL_WRITE,
     REMOTE_SYNC_VERSION_MISMATCH,
 }
 
-/**
- * Domain user choice when resolving an active synchronization or concurrent-write conflict.
- *
- * (Pyre, Chapter 10.1).
- */
 enum class ConflictDecision {
     KEEP_LOCAL,
     KEEP_REMOTE,
 }
 
-/**
- * Domain summary of an unresolved optimistic-locking or remote-sync conflict on a shade cart.
- *
- * Provides the presentation layer with conflict comparison fields without exposing storage JSON
- * (Pyre, Chapter 10.1).
- */
 data class SyncConflictModel(
     val cartId: String,
     val fabricName: String,
@@ -169,11 +150,6 @@ data class SyncConflictModel(
     val detectedAt: Long,
 )
 
-/**
- * Domain input model representing a swatch mutation payload passed to repository/use-case boundaries.
- *
- * (Pyre, Chapter 10.1).
- */
 data class SwatchInput(
     val id: String = UUID.randomUUID().toString(),
     val fabricTypeId: String = "",
@@ -187,14 +163,16 @@ data class SwatchInput(
     val bboxRight: Float = 0f,
     val bboxBottom: Float = 0f,
     val isOverridden: Boolean = false,
+    val labL: Double = 0.0,
+    val labA: Double = 0.0,
+    val labB: Double = 0.0,
+    val weaveTag: WeaveTag = WeaveTag.MATTE,
+    val sheenScore: Float = 0f,
+    val pricePerMeter: Double? = null,
+    val currencyCode: String = "EGP",
     val version: Long = 1L,
 )
 
-/**
- * Domain input model for creating or retrieving a new shade cart draft.
- *
- * (Pyre, Chapter 10.1).
- */
 data class ShadeCartCreateInput(
     val id: String = UUID.randomUUID().toString(),
     val fabricTypeId: String? = null,
@@ -206,13 +184,12 @@ data class ShadeCartCreateInput(
     val editedImagePath: String? = null,
     val editStackJson: String = "{}",
     val headerOcrRaw: String = "",
+    val calibrationProfileId: String? = null,
+    val ambientLux: Float = -1f,
+    val qrDeepLink: String = "",
     val swatches: List<SwatchInput> = emptyList(),
 )
 
-/**
- * Sealed outcome for shade-cart write/conflict-resolution operations, enabling exhaustive `when`
- * handling in ViewModels without unchecked exceptions (Pyre, Chapter 8.3 & Chapter 10.1).
- */
 sealed interface ShadeCartSaveOutcome {
     data class Saved(
         val cartId: String,
@@ -228,11 +205,6 @@ sealed interface ShadeCartSaveOutcome {
     ) : ShadeCartSaveOutcome
 }
 
-/**
- * Domain summary reported after draining the offline sync queue against local/remote adapters.
- *
- * (Pyre, Chapter 8.2 & Chapter 10.1).
- */
 data class SyncBatchSummary(
     val processed: Int,
     val synced: Int,
@@ -240,21 +212,12 @@ data class SyncBatchSummary(
     val failed: Int,
 )
 
-/**
- * Domain theme appearance mode persisted via DataStore Preferences.
- *
- * Decouples UI theme rendering from `data/prefs` implementation (Pyre, Chapter 5.4 & Chapter 10.4).
- */
 enum class ThemeModeSetting {
     SYSTEM,
     LIGHT,
     DARK,
 }
 
-/**
- * Curated Al AzharTex brand accent palette options for non-dynamic-color or fallback Material 3
- * schemes (Pyre, Chapter 5.2 & Chapter 5.4).
- */
 enum class AccentPaletteSetting(
     val displayName: String,
     val primaryHex: String,
@@ -266,19 +229,12 @@ enum class AccentPaletteSetting(
     TERRACOTTA_CHARCOAL("Terracotta & Charcoal", "#9A3412", "#334155"),
 }
 
-/**
- * Pure Kotlin domain representation of user appearance settings (Pyre, Chapter 10.4).
- */
 data class ThemeSettings(
     val themeMode: ThemeModeSetting = ThemeModeSetting.SYSTEM,
     val useDynamicColor: Boolean = true,
     val accentPalette: AccentPaletteSetting = AccentPaletteSetting.AZHAR_NAVY_CRIMSON,
 )
 
-/**
- * Generic sealed asynchronous state wrapper modeling Loading, Success, and Error states
- * for reactive UI flows (Pyre, Chapter 8.3 — Handling Loading and Error States).
- */
 sealed interface AsyncResult<out T> {
     data object Loading : AsyncResult<Nothing>
     data class Success<T>(val data: T) : AsyncResult<T>
@@ -286,4 +242,322 @@ sealed interface AsyncResult<out T> {
         val message: String,
         val cause: Throwable? = null,
     ) : AsyncResult<Nothing>
+}
+
+// ---------------------------------------------------------------------------
+// A1 — ShadeLock Calibration Profiles
+// ---------------------------------------------------------------------------
+
+@Serializable
+data class CalibrationProfile(
+    val id: String = UUID.randomUUID().toString(),
+    val name: String = "Showroom D65",
+    val gainR: Float = 1f,
+    val gainG: Float = 1f,
+    val gainB: Float = 1f,
+    val ambientLux: Float = -1f,
+    val matrix3x3: List<Float>? = null,
+    val deviceId: String = "android-device",
+    val capturedAt: Long = System.currentTimeMillis(),
+) {
+    val profileName: String get() = name
+    val luxLevel: Float? get() = if (ambientLux >= 0f) ambientLux else null
+}
+
+data class CalibrationPreferencesState(
+    val profiles: List<CalibrationProfile> = emptyList(),
+    val activeProfileId: String? = null,
+) {
+    val activeProfile: CalibrationProfile?
+        get() = profiles.firstOrNull { it.id == activeProfileId } ?: profiles.firstOrNull()
+
+    fun isRecalibrationRecommended(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val active = activeProfile ?: return false
+        val thirtyDaysMillis = 30L * 24L * 60L * 60L * 1000L
+        return (nowMillis - active.capturedAt) > thirtyDaysMillis
+    }
+}
+
+// ---------------------------------------------------------------------------
+// A2 & C4 — Perceptual ΔE Duplicate Guard & Reverse Shade Finder
+// ---------------------------------------------------------------------------
+
+data class DuplicateShadeWarning(
+    val existingSwatchId: String,
+    val existingSwatchNumber: String,
+    val existingColorName: String,
+    val existingCartName: String,
+    val deltaE: Float,
+)
+
+data class ColorSearchResult(
+    val swatch: SwatchModel,
+    val cartName: String,
+    val cartCode: String,
+    val fabricTypeName: String,
+    val roll: WarehouseRollModel?,
+    val deltaE: Float,
+)
+
+// ---------------------------------------------------------------------------
+// B1 & B2 — Multi-Format Exports & Buyer Presentation Session
+// ---------------------------------------------------------------------------
+
+enum class ExportFormat(val extension: String, val mimeType: String) {
+    PDF("pdf", "application/pdf"),
+    PNG("png", "image/png"),
+    WHATSAPP_PACK("png", "image/png"),
+    GIMP_GPL("gpl", "text/plain"),
+    PROCREATE_SWATCHES("swatches", "application/zip"),
+    CSV("csv", "text/csv"),
+    HTML_LOOKBOOK("html", "text/html"),
+}
+
+data class ExportDocumentResult(
+    val filePath: String,
+    val format: ExportFormat,
+    val shareCaption: String,
+    val sha256Hex: String,
+)
+
+data class BuyerSessionState(
+    val isBuyerMode: Boolean = false,
+    val companyName: String = "Al AzharTex Partner",
+    val favoritedSwatchIds: Set<String> = emptySet(),
+    val pinConfigured: Boolean = false,
+)
+
+// ---------------------------------------------------------------------------
+// B3 — 2.5D Drape Visualization
+// ---------------------------------------------------------------------------
+
+enum class DrapeScene(val label: String, val labelAr: String, val assetPath: String) {
+    CURTAIN_FOLD("Curtain", "ستائر", "drape/curtain_fold_gray.webp"),
+    SHIRT_DRAPE("Shirt", "قميص", "drape/shirt_drape_gray.webp"),
+    UPHOLSTERY("Upholstery", "تنجيد", "drape/upholstery_gray.webp"),
+}
+
+enum class DrapeLightingMode(val label: String) {
+    DAYLIGHT_6500K("6500K D65"),
+    STORE_LED_4000K("4000K LED"),
+    INCANDESCENT_2800K("2800K Warm"),
+}
+
+// ---------------------------------------------------------------------------
+// C1 — QR / Barcode / NFC Deep-Link Targets
+// ---------------------------------------------------------------------------
+
+sealed interface ScannedBarcodeTarget {
+    data class CartDeepLink(val cartId: String) : ScannedBarcodeTarget
+    data class RollCode(val rollCode: String) : ScannedBarcodeTarget
+    data class RawText(val value: String) : ScannedBarcodeTarget
+}
+
+// ---------------------------------------------------------------------------
+// C2 — Dye-Lot Tracking & Shade Consistency ("ΔE Guard")
+// ---------------------------------------------------------------------------
+
+data class DyeLotModel(
+    val id: String,
+    val rollId: String,
+    val lotCode: String,
+    val dyeDate: Long,
+    val masterDeltaE: Double = -1.0,
+    val operatorName: String = "Dye Master",
+    val notes: String = "",
+    val version: Long = 1L,
+    val updatedAt: Long = 0L,
+)
+
+data class LotDeltaE(
+    val lot: DyeLotModel,
+    val rollCode: String,
+    val deltaE: Float,
+)
+
+data class MixedLotWarning(
+    val swatchId: String,
+    val swatchNumber: String,
+    val lotCodeA: String,
+    val lotCodeB: String,
+    val deltaEDiff: Float,
+)
+
+data class ShadeConsistencyReport(
+    val cartId: String,
+    val worstDeltaE: Float,
+    val mixedLotWarnings: List<MixedLotWarning>,
+    val perShadeVariance: Map<String, List<LotDeltaE>>,
+)
+
+// ---------------------------------------------------------------------------
+// C3 & C5c — Reservations, Cut Log & Pricing Tiers
+// ---------------------------------------------------------------------------
+
+data class ReservationModel(
+    val id: String,
+    val rollId: String,
+    val swatchId: String,
+    val metersReserved: Double,
+    val reservedBy: String,
+    val note: String = "",
+    val status: ReservationStatusModel = ReservationStatusModel.ACTIVE,
+    val createdAt: Long,
+    val expiresAt: Long,
+)
+
+data class CutLogModel(
+    val id: String,
+    val rollId: String,
+    val swatchId: String,
+    val metersCut: Double,
+    val pieceCount: Int,
+    val operatorName: String,
+    val createdAt: Long,
+)
+
+data class PriceTierModel(
+    val id: String,
+    val fabricTypeId: String,
+    val tierName: String,
+    val minMeters: Double,
+    val pricePerMeter: Double,
+    val currencyCode: String = "EGP",
+    val updatedAt: Long = 0L,
+)
+
+// ---------------------------------------------------------------------------
+// D3, D4, & E3 — Locale, Glove Mode, Roles & Backend Readiness Contracts
+// ---------------------------------------------------------------------------
+
+enum class AppLanguageSetting(val tag: String, val displayName: String) {
+    SYSTEM("", "System Default"),
+    ENGLISH("en", "English"),
+    ARABIC_EG("ar-EG", "العربية (مصر)"),
+}
+
+enum class AppRole(val displayName: String) {
+    MANAGER("Manager"),
+    ADMIN("Admin"),
+    MILL_OPERATOR("Mill Operator"),
+    WAREHOUSE("Warehouse"),
+    SALES_REP("Sales Rep"),
+    BUYER("Buyer"),
+}
+
+object RoleGate {
+    fun canEditCarts(role: AppRole): Boolean =
+        role == AppRole.MANAGER || role == AppRole.ADMIN || role == AppRole.MILL_OPERATOR
+
+    fun canReserveOrCut(role: AppRole): Boolean =
+        role == AppRole.MANAGER || role == AppRole.ADMIN || role == AppRole.MILL_OPERATOR || role == AppRole.WAREHOUSE
+
+    fun canViewCosts(role: AppRole): Boolean =
+        role == AppRole.MANAGER || role == AppRole.ADMIN
+
+    fun canSyncManually(role: AppRole): Boolean =
+        role != AppRole.BUYER && role != AppRole.SALES_REP
+
+    fun canExport(role: AppRole): Boolean =
+        role != AppRole.WAREHOUSE
+}
+
+data class AppSessionPreferences(
+    val role: AppRole = AppRole.MANAGER,
+    val language: AppLanguageSetting = AppLanguageSetting.SYSTEM,
+    val gloveMode: Boolean = false,
+    val lastOperatorName: String = "Mill Operator",
+    val lastBackupTimestampMillis: Long? = null,
+    val lastBackupSizeBytes: Long? = null,
+    val deltaETolerance: Float = 2.0f,
+) {
+    fun isBackupReminderDue(nowMillis: Long = System.currentTimeMillis()): Boolean {
+        val last = lastBackupTimestampMillis ?: return true
+        val sevenDays = 7L * 24L * 60L * 60L * 1000L
+        return (nowMillis - last) > sevenDays
+    }
+}
+
+// ---------------------------------------------------------------------------
+// E1 & E2 — Natural Language Query & Mill Insights
+// ---------------------------------------------------------------------------
+
+enum class AskAzPalleteSource {
+    GEMINI_NANO,
+    OFFLINE_TEMPLATE,
+}
+
+data class AskInventoryItem(
+    val swatchId: String,
+    val swatchNumber: String,
+    val colorName: String,
+    val colorHex: String,
+    val fabricName: String,
+    val rollCode: String?,
+    val warehouseShed: String?,
+    val availableMeters: Double?,
+    val deltaE: Float?,
+)
+
+data class AskAzPalleteResult(
+    val query: String,
+    val source: AskAzPalleteSource,
+    val summary: String,
+    val items: List<AskInventoryItem>,
+)
+
+data class SlowMovingShadeMetric(
+    val swatch: SwatchModel,
+    val daysInStock: Long,
+    val metersRemaining: Double,
+)
+
+data class FastMovingShadeMetric(
+    val swatch: SwatchModel,
+    val reservationsCount: Int,
+    val cutCount: Int,
+)
+
+data class FavoritedShadeMetric(
+    val swatch: SwatchModel,
+    val favoriteCount: Int,
+)
+
+data class LotVarianceSummaryItem(
+    val colorFamily: String,
+    val worstDeltaE: Float,
+    val lotCount: Int,
+)
+
+data class MillInsightsReport(
+    val totalActiveCarts: Int,
+    val lowStockCount: Int,
+    val pendingSyncCount: Int,
+    val syncHealthScore: Float,
+    val stockByFabricType: Map<String, Double>,
+    val stockValuePerShed: Map<String, Double>,
+    val totalInventoryValue: Double,
+    val slowestMovingShades: List<SlowMovingShadeMetric>,
+    val fastestMovingShades: List<FastMovingShadeMetric>,
+    val mostFavoritedShades: List<FavoritedShadeMetric>,
+    val lotVarianceSummary: List<LotVarianceSummaryItem>,
+)
+
+// ---------------------------------------------------------------------------
+// E3 — Remote Backend Readiness Delta Packets
+// ---------------------------------------------------------------------------
+
+data class RemoteSyncPacket(
+    val packetId: String = UUID.randomUUID().toString(),
+    val cart: ShadeCartModel? = null,
+    val lots: List<DyeLotModel> = emptyList(),
+    val reservations: List<ReservationModel> = emptyList(),
+    val cutLogs: List<CutLogModel> = emptyList(),
+    val timestampMillis: Long = System.currentTimeMillis(),
+)
+
+sealed interface RemoteSyncPacketResult {
+    data class Accepted(val remoteVersion: Long) : RemoteSyncPacketResult
+    data class Conflict(val remoteVersion: Long) : RemoteSyncPacketResult
+    data class TransientFailure(val message: String) : RemoteSyncPacketResult
 }

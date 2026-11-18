@@ -7,6 +7,7 @@ import com.alazhartex.shadecart.data.local.SyncQueueEntity
 import com.alazhartex.shadecart.data.local.SyncStatus
 import com.alazhartex.shadecart.data.sync.ShadeCartSyncAdapter
 import com.alazhartex.shadecart.data.sync.SyncPushResult
+import com.alazhartex.shadecart.domain.imaging.ColorScience
 import com.alazhartex.shadecart.domain.model.ConflictDecision
 import com.alazhartex.shadecart.domain.model.ConflictOrigin
 import com.alazhartex.shadecart.domain.model.FabricTypeModel
@@ -30,10 +31,6 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import java.util.UUID
 
-/**
- * Coordinates WorkManager background sync scheduling from the data layer without coupling the
- * repository directly to Android [androidx.work.WorkManager] APIs (Pyre, Chapter 10.1).
- */
 interface SyncWorkScheduler {
     fun enqueueSync()
 }
@@ -41,10 +38,6 @@ interface SyncWorkScheduler {
 /**
  * Offline-first repository implementing [ShadeCartRepositoryContract] over [ShadeCartStore]
  * (Room) and [ShadeCartSyncAdapter] (Retrofit + OkHttp + offline stub fallback).
- *
- * Maps storage entities to pure Kotlin domain models at the repository boundary while executing all
- * writes off the main thread on [ioDispatcher], serialized via [writeMutex] inside Room database
- * transactions (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2, 10.1, & 10.3).
  */
 class ShadeCartRepository(
     private val store: ShadeCartStore,
@@ -106,6 +99,10 @@ class ShadeCartRepository(
                     editedImagePath = draft.editedImagePath,
                     editStackJson = draft.editStackJson,
                     headerOcrRaw = draft.headerOcrRaw,
+                    calibrationProfileId = draft.calibrationProfileId,
+                    ambientLux = draft.ambientLux,
+                    qrDeepLink = draft.qrDeepLink.ifBlank { "azpallete://cart/${draft.id}" },
+                    isArchived = false,
                     syncStatus = SyncStatus.PENDING,
                     version = 1L,
                     lastSyncedVersion = 0L,
@@ -115,6 +112,7 @@ class ShadeCartRepository(
                     val matchedRollId = sw.rollId ?: availableRolls.firstOrNull {
                         it.shadeLabel.equals(sw.swatchNumber.trim(), ignoreCase = true)
                     }?.id
+                    val (l, a, b) = resolveSwatchLab(sw)
                     SwatchEntity(
                         id = sw.id,
                         shadeCartId = cartEntity.id,
@@ -129,6 +127,13 @@ class ShadeCartRepository(
                         bboxRight = sw.bboxRight,
                         bboxBottom = sw.bboxBottom,
                         isOverridden = sw.isOverridden,
+                        labL = l,
+                        labA = a,
+                        labB = b,
+                        weaveTag = sw.weaveTag.name,
+                        sheenScore = sw.sheenScore,
+                        pricePerMeter = sw.pricePerMeter,
+                        currencyCode = sw.currencyCode,
                         version = 1L,
                         updatedAt = now,
                     )
@@ -150,11 +155,6 @@ class ShadeCartRepository(
         }
     }
 
-    /**
-     * Optimistically locks updates against [expectedVersion].
-     * When another writer commits first, rejects the stale write, persists a conflict entry in
-     * `sync_queue` so conflict alerts survive process death, and returns [ShadeCartSaveOutcome.Conflict].
-     */
     override suspend fun saveCartWithOptimisticLock(
         cartId: String,
         expectedVersion: Long,
@@ -199,6 +199,10 @@ class ShadeCartRepository(
                     version = expectedVersion + 1L,
                     swatches = swatches.mapIndexed { idx, sw -> sw.toDraft(resolvedFabric.id, idx) },
                     updatedAt = now,
+                    calibrationProfileId = existing.calibrationProfileId,
+                    ambientLux = existing.ambientLux,
+                    qrDeepLink = existing.qrDeepLink.ifBlank { "azpallete://cart/$cartId" },
+                    isArchived = existing.isArchived,
                 )
 
                 if (existing.version != expectedVersion) {
@@ -228,6 +232,7 @@ class ShadeCartRepository(
                     editedImagePath = editedImagePath,
                     editStackJson = editStackJson,
                     headerOcrRaw = headerOcrRaw,
+                    qrDeepLink = existing.qrDeepLink.ifBlank { "azpallete://cart/$cartId" },
                     syncStatus = SyncStatus.PENDING,
                     version = newVersion,
                     updatedAt = now,
@@ -239,6 +244,7 @@ class ShadeCartRepository(
                     val matchedRollId = sw.rollId ?: availableRolls.firstOrNull {
                         it.shadeLabel.equals(sw.swatchNumber.trim(), ignoreCase = true)
                     }?.id
+                    val (l, a, b) = resolveSwatchLab(sw)
                     SwatchEntity(
                         id = sw.id,
                         shadeCartId = cartId,
@@ -253,6 +259,13 @@ class ShadeCartRepository(
                         bboxRight = sw.bboxRight,
                         bboxBottom = sw.bboxBottom,
                         isOverridden = sw.isOverridden,
+                        labL = l,
+                        labA = a,
+                        labB = b,
+                        weaveTag = sw.weaveTag.name,
+                        sheenScore = sw.sheenScore,
+                        pricePerMeter = sw.pricePerMeter ?: prev?.pricePerMeter,
+                        currencyCode = sw.currencyCode,
                         version = nextSwatchVersion,
                         updatedAt = now,
                     )
@@ -297,10 +310,6 @@ class ShadeCartRepository(
         )
     }
 
-    /**
-     * Drains pending items from `sync_queue` using [ShadeCartSyncAdapter].
-     * Remote HTTP 409 / version mismatches record a non-blocking conflict without overwriting local work.
-     */
     override suspend fun syncPendingQueue(): SyncBatchSummary = withContext(ioDispatcher) {
         val pending = store.getPendingSyncItems()
         var syncedCount = 0
@@ -450,6 +459,10 @@ class ShadeCartRepository(
                     editedImagePath = chosenSnapshot.editedImagePath,
                     editStackJson = chosenSnapshot.editStackJson,
                     headerOcrRaw = chosenSnapshot.headerOcrRaw,
+                    calibrationProfileId = chosenSnapshot.calibrationProfileId,
+                    ambientLux = chosenSnapshot.ambientLux,
+                    qrDeepLink = chosenSnapshot.qrDeepLink.ifBlank { "azpallete://cart/$cartId" },
+                    isArchived = chosenSnapshot.isArchived,
                     syncStatus = syncStatus,
                     version = chosenSnapshot.version,
                     lastSyncedVersion = lastSyncedVersion,
@@ -461,6 +474,16 @@ class ShadeCartRepository(
                     val matchedRollId = sw.rollId ?: availableRolls.firstOrNull {
                         it.shadeLabel.equals(sw.swatchNumber.trim(), ignoreCase = true)
                     }?.id
+                    val (l, a, b) = if (sw.labL != 0.0 || sw.labA != 0.0 || sw.labB != 0.0) {
+                        Triple(sw.labL, sw.labA, sw.labB)
+                    } else {
+                        val computed = ColorScience.hexToLab(sw.colorHex)
+                        if (computed != null) {
+                            Triple(computed.first.toDouble(), computed.second.toDouble(), computed.third.toDouble())
+                        } else {
+                            Triple(0.0, 0.0, 0.0)
+                        }
+                    }
                     SwatchEntity(
                         id = sw.id,
                         shadeCartId = cartId,
@@ -475,6 +498,13 @@ class ShadeCartRepository(
                         bboxRight = sw.bboxRight,
                         bboxBottom = sw.bboxBottom,
                         isOverridden = sw.isOverridden,
+                        labL = l,
+                        labA = a,
+                        labB = b,
+                        weaveTag = sw.weaveTag,
+                        sheenScore = sw.sheenScore,
+                        pricePerMeter = sw.pricePerMeter,
+                        currencyCode = sw.currencyCode,
                         version = maxOf(1L, sw.version),
                         updatedAt = now,
                     )
@@ -510,6 +540,18 @@ class ShadeCartRepository(
                 store.deletePendingSyncItems(cartId)
                 store.deleteCart(cartId)
             }
+        }
+    }
+
+    private fun resolveSwatchLab(sw: SwatchInput): Triple<Double, Double, Double> {
+        if (sw.labL != 0.0 || sw.labA != 0.0 || sw.labB != 0.0) {
+            return Triple(sw.labL, sw.labA, sw.labB)
+        }
+        val computed = ColorScience.hexToLab(sw.colorHex)
+        return if (computed != null) {
+            Triple(computed.first.toDouble(), computed.second.toDouble(), computed.third.toDouble())
+        } else {
+            Triple(0.0, 0.0, 0.0)
         }
     }
 
@@ -629,6 +671,10 @@ class ShadeCartRepository(
         editStackJson = cart.editStackJson,
         headerOcrRaw = cart.headerOcrRaw,
         version = cart.version,
+        calibrationProfileId = cart.calibrationProfileId,
+        ambientLux = cart.ambientLux,
+        qrDeepLink = cart.qrDeepLink,
+        isArchived = cart.isArchived,
         swatches = swatches.sortedBy { it.positionOrder }.map { sw ->
             SwatchDraft(
                 id = sw.id,
@@ -643,6 +689,13 @@ class ShadeCartRepository(
                 bboxRight = sw.bboxRight,
                 bboxBottom = sw.bboxBottom,
                 isOverridden = sw.isOverridden,
+                labL = sw.labL,
+                labA = sw.labA,
+                labB = sw.labB,
+                weaveTag = sw.weaveTag,
+                sheenScore = sw.sheenScore,
+                pricePerMeter = sw.pricePerMeter,
+                currencyCode = sw.currencyCode,
                 version = sw.version,
             )
         },

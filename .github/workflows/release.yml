@@ -7,9 +7,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag to publish (e.g. v1.0.0)"
+        description: "Release tag to publish (e.g. v2.0.0)"
         required: true
-        default: "v1.0.0"
+        default: "v2.0.0"
 
 permissions:
   contents: write
@@ -121,14 +121,14 @@ jobs:
           notes = textwrap.dedent(f"""\
           ## Al AzharTex — Digital Shade Cart ({tag})
 
-          Release `{tag}` of the **Al AzharTex Digital Shade Cart** Android module (`com.alazhartex.shadecart`), digitizing physical A4 fabric shade carts into Room-backed `ShadeCartEntity` and `SwatchEntity` records using metric units (**GSM**, **cm**, **m**).
+          Release `{tag}` of the **Al AzharTex Digital Shade Cart** Android application (`com.alazhartex.shadecart`, `versionCode = 4`), digitizing physical A4 fabric shade carts into Room v2 (`MIGRATION_1_2`) inventory records using metric units (**GSM**, **cm**, **m**).
 
           ### Highlights
-          - **Adaptive App Icon**: Crisp white (`#FFFFFF`) launcher icon background behind the Al AzharTex emblem (`ic_launcher_background.xml`).
-          - **Capture & Non-Destructive Editing (`CartCaptureScreen`, `CartEditScreen`)**: CameraX viewfinder + Photo Picker upload, `<= 2048 px` downsampling, `RGB_565` off-main-thread previews, CanHub `android-image-cropper` free/fixed-aspect presets, and non-destructive `EditStack` with `SavedStateHandle` process-death restoration.
-          - **On-Device Vision (ML Kit)**: Latin Text Recognition (`16.0.1`) for header metadata and numeric swatch labels, Subject Segmentation (`16.0.0-beta1`) via `ModuleInstall` with non-blocking crop-only fallback, and two-column pinked-swatch sampling (18% inner inset + AndroidX `Palette` + median fallback).
-          - **Digital Shade Card & Manual Palette Editor (`DigitalShadeCardScreen`, `PaletteEditorScreen`)**: Two-column pinked swatch chips linked to `Roll` warehouse inventory, empty-state manual add CTA, drag-handle swatch reordering, and strict HEX validation (`^#([0-9A-Fa-f]{{6}}|[0-9A-Fa-f]{{3}})$`) with live preview.
-          - **Concurrency, Sync & Material 3**: `Mutex` + `RoomDatabase.withTransaction` optimistic locking with conflict resolution banner/Snackbar, `WorkManager` sync queue + pluggable `ShadeCartSyncAdapter`, Al AzharTex branding, API 31+ dynamic color, and custom accent palettes.
+          - **Color Science & ShadeLock™ Calibration (`ColorScience`, `ColorCalibrator`, `PureImageMath`)**: Pure Kotlin sRGB/XYZ/CIELAB (`D65`) & CIEDE2000 ΔE₂₀₀₀ perceptual delta calculations, 3-frame median HDR burst stacking, flat-field illumination correction, weave texture analysis, live ambient lux monitor, and saved calibration profiles.
+          - **Capture, OCR & Non-Destructive Editing (`CartCaptureScreen`, `CartEditScreen`)**: CameraX viewfinder + live Laplacian focus readout, ML Kit Document Scanner / Photo Picker / Sample A4 asset, CanHub `android-image-cropper`, interactive overlay swatch box editor, ML Kit Text Recognition & Subject Segmentation with crop-only fallback, and `EditStack` process-death restoration.
+          - **Mill Hub (`InventoryAndMillScreen`)**: Reverse Shade Finder ranked by ΔE₂₀₀₀, Warehouse Rolls & Dye Lots (`RL-*` QR scanning + printable QR label sheet PDF), meter reservations, cut-piece ledger with `LowStockAlertWorker` notifications, volume price tiers, offline **Ask AzPallete** English/Arabic NL queries, and Mill Insights analytics.
+          - **Buyer Showcase & 2.5D Drape (`BuyerShowcaseScreen`, `DrapePreviewDialog`)**: PIN-locked Buyer Showcase mode isolating internal sheds/costs, favorite shade shortlists & quote sharing, and interactive 2.5D fabric drape preview (Shirt, Curtain, Upholstery under D65 / Warm / Cool lighting).
+          - **Multi-Format Exporters, Glance Widget, Backup & P2P Sync**: Export to A4 PDF, PNG card, bidi-safe WhatsApp caption, GIMP `.gpl`, Procreate `.swatches`, CSV, and standalone HTML lookbooks; Jetpack Glance home-screen widget; AES-256-GCM encrypted ZIP backup/restore with SHA-256 checksums; Nearby Connections P2P sync; EN/AR localization with RTL & Glove Mode; and Room `withTransaction` + `Mutex` conflict resolution.
 
           ### Artifacts & Signing
           - `{rel_name}`: {sign_note}

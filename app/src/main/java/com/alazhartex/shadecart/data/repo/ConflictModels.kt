@@ -23,6 +23,13 @@ data class SwatchDraft(
     val bboxBottom: Float = 0f,
     val isOverridden: Boolean = false,
     val version: Long = 1L,
+    val labL: Double = 0.0,
+    val labA: Double = 0.0,
+    val labB: Double = 0.0,
+    val weaveTag: String = "MATTE",
+    val sheenScore: Float = 0f,
+    val pricePerMeter: Double? = null,
+    val currencyCode: String = "EGP",
 )
 
 /**
@@ -44,6 +51,10 @@ data class ShadeCartSnapshot(
     val version: Long,
     val swatches: List<SwatchDraft>,
     val updatedAt: Long,
+    val calibrationProfileId: String? = null,
+    val ambientLux: Float = -1f,
+    val qrDeepLink: String = "",
+    val isArchived: Boolean = false,
 )
 
 /**

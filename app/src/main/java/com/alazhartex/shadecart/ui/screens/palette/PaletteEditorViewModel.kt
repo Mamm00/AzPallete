@@ -3,11 +3,14 @@ package com.alazhartex.shadecart.ui.screens.palette
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.alazhartex.shadecart.domain.imaging.ColorScience
 import com.alazhartex.shadecart.domain.imaging.PinkedSwatchSampler
+import com.alazhartex.shadecart.domain.model.DuplicateShadeWarning
 import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
 import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
 import com.alazhartex.shadecart.domain.model.SwatchInput
 import com.alazhartex.shadecart.domain.model.WarehouseRollModel
+import com.alazhartex.shadecart.domain.usecase.CheckDuplicateShadeUseCase
 import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartByIdUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartsUseCase
@@ -24,10 +27,6 @@ import kotlinx.coroutines.launch
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * Immutable presentation state for manual swatch HEX color validation, live preview, reordering,
- * and warehouse roll linking (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3).
- */
 data class PaletteEditorUiState(
     val cartId: String? = null,
     val cartTitle: String = "Manual Palette Editor",
@@ -39,19 +38,17 @@ data class PaletteEditorUiState(
     val swatchNumberInput: String = "",
     val colorNameInput: String = "",
     val hexInput: String = "#102A71",
+    val priceInput: String = "",
     val hexValidationError: String? = null,
     val livePreviewArgb: Int? = 0xFF102A71.toInt(),
+    val liveLab: Triple<Float, Float, Float>? = null,
+    val duplicateWarning: DuplicateShadeWarning? = null,
     val selectedRollId: String? = null,
     val isHexValid: Boolean = true,
     val isSaving: Boolean = false,
     val statusMessage: String? = null,
 )
 
-/**
- * `@HiltViewModel` backing [PaletteEditorRoute], relying solely on pure Kotlin domain UseCases and
- * [HexColorValidator] for deterministic HEX validation and optimistic-locked saves
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 1.2, 6.3, & 10.1).
- */
 @HiltViewModel
 class PaletteEditorViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
@@ -60,6 +57,7 @@ class PaletteEditorViewModel @Inject constructor(
     private val observeWarehouseRolls: ObserveWarehouseRollsUseCase,
     private val createOrGetShadeCart: CreateOrGetShadeCartUseCase,
     private val updateShadeCartSwatches: UpdateShadeCartSwatchesUseCase,
+    private val checkDuplicateShade: CheckDuplicateShadeUseCase,
 ) : ViewModel() {
 
     companion object {
@@ -114,6 +112,13 @@ class PaletteEditorViewModel @Inject constructor(
                         bboxRight = sw.bboxRight,
                         bboxBottom = sw.bboxBottom,
                         isOverridden = sw.isOverridden,
+                        labL = sw.labL,
+                        labA = sw.labA,
+                        labB = sw.labB,
+                        weaveTag = sw.weaveTag,
+                        sheenScore = sw.sheenScore,
+                        pricePerMeter = sw.pricePerMeter,
+                        currencyCode = sw.currencyCode,
                         version = sw.version,
                     )
                 }
@@ -144,6 +149,7 @@ class PaletteEditorViewModel @Inject constructor(
                 editingSwatchId = swatch.id,
                 swatchNumberInput = swatch.swatchNumber,
                 colorNameInput = swatch.colorName,
+                priceInput = swatch.pricePerMeter?.toString().orEmpty(),
                 selectedRollId = swatch.rollId,
                 statusMessage = null,
             )
@@ -158,6 +164,7 @@ class PaletteEditorViewModel @Inject constructor(
                 editingSwatchId = null,
                 swatchNumberInput = nextNum,
                 colorNameInput = "",
+                priceInput = "",
                 selectedRollId = null,
                 statusMessage = null,
             )
@@ -174,6 +181,10 @@ class PaletteEditorViewModel @Inject constructor(
         _uiState.update { it.copy(colorNameInput = value) }
     }
 
+    fun onPriceChanged(value: String) {
+        _uiState.update { it.copy(priceInput = value.filter { ch -> ch.isDigit() || ch == '.' }) }
+    }
+
     fun onRollSelected(rollId: String?) {
         _uiState.update { it.copy(selectedRollId = rollId) }
     }
@@ -182,13 +193,24 @@ class PaletteEditorViewModel @Inject constructor(
         savedStateHandle[KEY_HEX_INPUT] = value
         when (val validation = HexColorValidator.validate(value)) {
             is HexColorValidator.ValidationResult.Valid -> {
+                val lab = ColorScience.hexToLab(validation.normalizedHex)
                 _uiState.update {
                     it.copy(
                         hexInput = value,
                         isHexValid = true,
                         hexValidationError = null,
                         livePreviewArgb = validation.argb,
+                        liveLab = lab,
+                        duplicateWarning = null,
                     )
+                }
+                val currentCartId = _uiState.value.cartId
+                viewModelScope.launch {
+                    val found = checkDuplicateShade(
+                        candidateHexes = listOf("preview" to validation.normalizedHex),
+                        excludeCartId = currentCartId,
+                    ).firstOrNull()
+                    _uiState.update { it.copy(duplicateWarning = found) }
                 }
             }
 
@@ -199,6 +221,8 @@ class PaletteEditorViewModel @Inject constructor(
                         isHexValid = false,
                         hexValidationError = validation.message,
                         livePreviewArgb = null,
+                        liveLab = null,
+                        duplicateWarning = null,
                     )
                 }
             }
@@ -224,6 +248,8 @@ class PaletteEditorViewModel @Inject constructor(
         val resolvedName = state.colorNameInput.trim().ifBlank {
             PinkedSwatchSampler.describeTextileColor(validation.argb)
         }
+        val lab = ColorScience.hexToLab(normalizedHex)
+        val price = state.priceInput.toDoubleOrNull()
 
         val currentList = state.swatches.toMutableList()
         val editId = state.editingSwatchId
@@ -236,6 +262,10 @@ class PaletteEditorViewModel @Inject constructor(
                     colorName = resolvedName,
                     rollId = state.selectedRollId,
                     isOverridden = true,
+                    labL = lab?.first?.toDouble() ?: 0.0,
+                    labA = lab?.second?.toDouble() ?: 0.0,
+                    labB = lab?.third?.toDouble() ?: 0.0,
+                    pricePerMeter = price,
                 )
             }
         } else {
@@ -249,6 +279,10 @@ class PaletteEditorViewModel @Inject constructor(
                     colorName = resolvedName,
                     positionOrder = currentList.size,
                     isOverridden = true,
+                    labL = lab?.first?.toDouble() ?: 0.0,
+                    labA = lab?.second?.toDouble() ?: 0.0,
+                    labB = lab?.third?.toDouble() ?: 0.0,
+                    pricePerMeter = price,
                 ),
             )
         }
@@ -261,6 +295,7 @@ class PaletteEditorViewModel @Inject constructor(
                 editingSwatchId = null,
                 swatchNumberInput = nextNum,
                 colorNameInput = "",
+                priceInput = "",
                 selectedRollId = null,
                 statusMessage = "Applied #$cleanNum ($normalizedHex). Tap Save Palette to persist.",
             )

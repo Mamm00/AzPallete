@@ -14,7 +14,7 @@ import androidx.annotation.WorkerThread
 import androidx.exifinterface.media.ExifInterface
 import com.alazhartex.shadecart.data.model.EditStack
 import com.alazhartex.shadecart.data.model.NormalizedRect
-import dagger.hilt.android.qualifiers.ApplicationContext
+import com.alazhartex.shadecart.domain.model.CalibrationProfile
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -29,9 +29,9 @@ import kotlin.math.roundToInt
  *
  * Enforces:
  * - Max 2048 px on the long edge for every stored/processed image.
- * - `RGB_565` configuration for display previews (half the heap footprint of ARGB_8888).
- * - Prompt recycling of intermediate bitmaps.
- * - Strict off-main-thread execution (`@WorkerThread` + [ioDispatcher]).
+ * - `RGB_565` configuration for display previews.
+ * - Non-destructive rendering of crop, rotation, flat-field illumination flattening (A3), and segmentation masks.
+ * - 3-frame RGB median stacking (A5a) and calibration patch extraction (A1).
  */
 class BitmapProcessor(
     private val context: Context,
@@ -57,10 +57,6 @@ class BitmapProcessor(
     fun maskFile(sessionId: String): File =
         File(editedDir(), "mask_$sessionId.png")
 
-    /**
-     * Imports a user-selected photo URI into app-private storage, applies EXIF orientation,
-     * and downsamples so its long edge never exceeds [MAX_LONG_EDGE_PX] (2048 px).
-     */
     suspend fun importUriToBoundedOriginal(uri: Uri): String = withContext(ioDispatcher) {
         val tempRaw = File(context.cacheDir, "raw_${UUID.randomUUID()}.tmp")
         try {
@@ -82,10 +78,6 @@ class BitmapProcessor(
         }
     }
 
-    /**
-     * Normalizes an already captured CameraX temp file in-place (or to a permanent original copy)
-     * capped at [MAX_LONG_EDGE_PX] (2048 px).
-     */
     suspend fun finalizeCapturedTempFile(tempPath: String): String = withContext(ioDispatcher) {
         val dest = File(capturesDir(), "orig_${UUID.randomUUID()}.jpg")
         downsampleAndSaveJpeg(
@@ -100,9 +92,85 @@ class BitmapProcessor(
     }
 
     /**
-     * Copies a bundled asset (such as `sample_shade_cart.png`) into app-private capture storage,
-     * downsampling if needed to <= 2048 px.
+     * A5a: Combines 3 burst-captured frame paths using per-pixel RGB median stacking to suppress
+     * sensor noise, writing a bounded <=2048px JPEG original.
      */
+    suspend fun mergeThreeFramesMedian(tempPaths: List<String>): String = withContext(ioDispatcher) {
+        require(tempPaths.isNotEmpty()) { "At least one frame required" }
+        if (tempPaths.size < 3) {
+            return@withContext finalizeCapturedTempFile(tempPaths.first())
+        }
+        val bitmaps = tempPaths.take(3).mapNotNull { path ->
+            decodeDownsampledBitmap(path, MAX_LONG_EDGE_PX, Bitmap.Config.ARGB_8888)
+        }
+        try {
+            if (bitmaps.size < 3) {
+                return@withContext finalizeCapturedTempFile(tempPaths.first())
+            }
+            val w = bitmaps[0].width
+            val h = bitmaps[0].height
+            val b2 = if (bitmaps[1].width == w && bitmaps[1].height == h) bitmaps[1] else Bitmap.createScaledBitmap(bitmaps[1], w, h, true)
+            val b3 = if (bitmaps[2].width == w && bitmaps[2].height == h) bitmaps[2] else Bitmap.createScaledBitmap(bitmaps[2], w, h, true)
+
+            val p1 = IntArray(w * h)
+            val p2 = IntArray(w * h)
+            val p3 = IntArray(w * h)
+            bitmaps[0].getPixels(p1, 0, w, 0, 0, w, h)
+            b2.getPixels(p2, 0, w, 0, 0, w, h)
+            b3.getPixels(p3, 0, w, 0, 0, w, h)
+
+            if (b2 !== bitmaps[1]) b2.recycle()
+            if (b3 !== bitmaps[2]) b3.recycle()
+
+            val stacked = PureImageMath.medianStackThreeFrames(p1, p2, p3)
+            val outBmp = Bitmap.createBitmap(stacked, w, h, Bitmap.Config.ARGB_8888)
+            val dest = File(capturesDir(), "orig_${UUID.randomUUID()}.jpg")
+            try {
+                FileOutputStream(dest).use { fos ->
+                    outBmp.compress(Bitmap.CompressFormat.JPEG, 93, fos)
+                }
+            } finally {
+                if (!outBmp.isRecycled) outBmp.recycle()
+            }
+            tempPaths.forEach { File(it).delete() }
+            dest.absolutePath
+        } finally {
+            bitmaps.forEach { if (!it.isRecycled) it.recycle() }
+        }
+    }
+
+    /**
+     * A1: Calibrates a [CalibrationProfile] from the specified gray patch [region] of an image path.
+     */
+    suspend fun calibrateFromImageRegion(
+        imagePath: String,
+        region: NormalizedRect,
+        deviceId: String,
+        profileName: String,
+        luxLevel: Float? = null,
+    ): CalibrationProfile = withContext(ioDispatcher) {
+        val bmp = decodeDownsampledBitmap(imagePath, 1024, Bitmap.Config.ARGB_8888)
+            ?: error("Unable to load calibration image")
+        try {
+            val x = (region.left * bmp.width).roundToInt().coerceIn(0, bmp.width - 1)
+            val y = (region.top * bmp.height).roundToInt().coerceIn(0, bmp.height - 1)
+            val r = (region.right * bmp.width).roundToInt().coerceIn(x + 1, bmp.width)
+            val b = (region.bottom * bmp.height).roundToInt().coerceIn(y + 1, bmp.height)
+            val w = (r - x).coerceAtLeast(1)
+            val h = (b - y).coerceAtLeast(1)
+            val pixels = IntArray(w * h)
+            bmp.getPixels(pixels, 0, w, x, y, w, h)
+            ColorCalibrator.calibrateFromGrayPixels(
+                pixels = pixels,
+                deviceId = deviceId,
+                profileName = profileName,
+                luxLevel = luxLevel,
+            )
+        } finally {
+            if (!bmp.isRecycled) bmp.recycle()
+        }
+    }
+
     suspend fun importAssetToBoundedOriginal(assetName: String): String = withContext(ioDispatcher) {
         val tempRaw = File(context.cacheDir, "asset_${UUID.randomUUID()}.tmp")
         try {
@@ -147,10 +215,6 @@ class BitmapProcessor(
         )
     }
 
-    /**
-     * Renders non-destructive [editStack] transforms from [originalPath] into [destFile].
-     * Never modifies or overwrites [originalPath].
-     */
     suspend fun renderNonDestructiveEdit(
         originalPath: String,
         editStack: EditStack,
@@ -186,6 +250,22 @@ class BitmapProcessor(
                     current.recycle()
                     current = cropped
                 }
+            }
+
+            if (editStack.flattenLighting) {
+                val w = current.width
+                val h = current.height
+                val pixels = IntArray(w * h)
+                current.getPixels(pixels, 0, w, 0, 0, w, h)
+                val flatPixels = PureImageMath.flattenIlluminationPixels(
+                    pixels = pixels,
+                    width = w,
+                    height = h,
+                    kernelFraction = editStack.lightingKernelFraction,
+                )
+                val flattened = Bitmap.createBitmap(flatPixels, w, h, Bitmap.Config.ARGB_8888)
+                current.recycle()
+                current = flattened
             }
 
             if (editStack.backgroundRemoved && !editStack.segmentationMaskPath.isNullOrBlank()) {

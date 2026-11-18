@@ -2,5 +2,6 @@
 <paths>
     <files-path name="captures" path="captures/" />
     <files-path name="edited" path="edited/" />
+    <cache-path name="exports" path="exports/" />
     <cache-path name="temp" path="/" />
 </paths>

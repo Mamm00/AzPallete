@@ -3,6 +3,7 @@ package com.alazhartex.shadecart.ui.screens.palette
 import androidx.lifecycle.SavedStateHandle
 import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
 import com.alazhartex.shadecart.domain.model.WarehouseRollModel
+import com.alazhartex.shadecart.domain.usecase.CheckDuplicateShadeUseCase
 import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
 import com.alazhartex.shadecart.domain.usecase.FakeShadeCartRepository
 import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartByIdUseCase
@@ -25,11 +26,6 @@ import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 
-/**
- * Unit tests for [PaletteEditorViewModel] using [StandardTestDispatcher] and `Dispatchers.setMain`
- * to verify `StateFlow` HEX validation, swatch list mutations, and optimistic-locked persistence
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 11.3 — Testing Coroutines & ViewModels).
- */
 @OptIn(ExperimentalCoroutinesApi::class)
 class PaletteEditorViewModelTest {
 
@@ -71,6 +67,7 @@ class PaletteEditorViewModelTest {
             observeWarehouseRolls = ObserveWarehouseRollsUseCase(repository),
             createOrGetShadeCart = CreateOrGetShadeCartUseCase(repository),
             updateShadeCartSwatches = UpdateShadeCartSwatchesUseCase(repository),
+            checkDuplicateShade = CheckDuplicateShadeUseCase(repository),
         )
 
     @Test

@@ -5,6 +5,7 @@ import android.os.StrictMode
 import androidx.hilt.work.HiltWorkerFactory
 import androidx.work.Configuration
 import com.alazhartex.shadecart.data.local.DatabaseSeeder
+import com.alazhartex.shadecart.data.sync.LowStockAlertScheduler
 import dagger.hilt.android.HiltAndroidApp
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,6 +22,9 @@ class AlAzharTexApplication : Application(), Configuration.Provider {
     @Inject
     lateinit var databaseSeeder: DatabaseSeeder
 
+    @Inject
+    lateinit var lowStockAlertScheduler: LowStockAlertScheduler
+
     private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override val workManagerConfiguration: Configuration
@@ -31,7 +35,6 @@ class AlAzharTexApplication : Application(), Configuration.Provider {
     override fun onCreate() {
         super.onCreate()
         if (BuildConfig.DEBUG) {
-            // Flag accidental main-thread disk I/O or slow pixel work during development
             StrictMode.setThreadPolicy(
                 StrictMode.ThreadPolicy.Builder()
                     .detectDiskReads()
@@ -43,6 +46,7 @@ class AlAzharTexApplication : Application(), Configuration.Provider {
         }
         appScope.launch {
             databaseSeeder.ensureSeeded()
+            lowStockAlertScheduler.schedulePeriodic()
         }
     }
 }

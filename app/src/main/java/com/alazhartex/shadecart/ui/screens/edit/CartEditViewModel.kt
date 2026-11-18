@@ -10,12 +10,19 @@ import com.alazhartex.shadecart.data.model.EditStep
 import com.alazhartex.shadecart.data.model.EditStepType
 import com.alazhartex.shadecart.data.model.NormalizedRect
 import com.alazhartex.shadecart.domain.imaging.BitmapProcessor
+import com.alazhartex.shadecart.domain.imaging.ColorScience
+import com.alazhartex.shadecart.domain.imaging.PinkedSwatchSampler
 import com.alazhartex.shadecart.domain.imaging.TwoColumnSwatchDetector
+import com.alazhartex.shadecart.domain.model.CalibrationProfile
+import com.alazhartex.shadecart.domain.model.DuplicateShadeWarning
 import com.alazhartex.shadecart.domain.model.FabricTypeModel
 import com.alazhartex.shadecart.domain.model.ShadeCartCreateInput
 import com.alazhartex.shadecart.domain.model.ShadeCartSaveOutcome
 import com.alazhartex.shadecart.domain.model.SwatchInput
+import com.alazhartex.shadecart.domain.model.WeaveTag
+import com.alazhartex.shadecart.domain.usecase.CheckDuplicateShadeUseCase
 import com.alazhartex.shadecart.domain.usecase.CreateOrGetShadeCartUseCase
+import com.alazhartex.shadecart.domain.usecase.ObserveCalibrationStateUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveFabricTypesUseCase
 import com.alazhartex.shadecart.domain.usecase.ObserveShadeCartByIdUseCase
 import com.alazhartex.shadecart.domain.usecase.SaveShadeCartUseCase
@@ -36,9 +43,6 @@ import kotlinx.serialization.json.Json
 import java.util.UUID
 import javax.inject.Inject
 
-/**
- * Editable UI model for an automatically detected or user-adjusted swatch on the card editor.
- */
 @Serializable
 data class DetectedSwatchEditable(
     val id: String,
@@ -49,13 +53,13 @@ data class DetectedSwatchEditable(
     val bboxTop: Float,
     val bboxRight: Float,
     val bboxBottom: Float,
+    val labL: Double = 0.0,
+    val labA: Double = 0.0,
+    val labB: Double = 0.0,
+    val weaveTag: WeaveTag = WeaveTag.MATTE,
+    val sheenScore: Float = 0f,
 )
 
-/**
- * Immutable presentation state for non-destructive card editing, OCR metadata review,
- * Subject Segmentation download prompts, and two-column swatch inspection
- * (Pyre, *Android Development with Jetpack Compose & Kotlin*, Chapter 6.3 & 10.1).
- */
 data class CartEditUiState(
     val sessionId: String = "",
     val existingCartId: String? = null,
@@ -71,6 +75,9 @@ data class CartEditUiState(
     val widthCmText: String = "",
     val rawHeaderOcr: String = "",
     val detectedSwatches: List<DetectedSwatchEditable> = emptyList(),
+    val selectedOverlaySwatchId: String? = null,
+    val duplicateWarnings: List<DuplicateShadeWarning> = emptyList(),
+    val activeCalibrationProfile: CalibrationProfile? = null,
     val fabricTypes: List<FabricTypeModel> = emptyList(),
     val selectedFabricTypeId: String? = null,
     val isProcessingImage: Boolean = false,
@@ -78,22 +85,20 @@ data class CartEditUiState(
     val hasRunInitialAnalysis: Boolean = false,
 )
 
-/**
- * `@HiltViewModel` backing [CartEditRoute], coordinating non-destructive CanHub cropping,
- * ML Kit Text Recognition & Subject Segmentation gateways, two-column pinked-swatch detection,
- * and Clean Architecture persistence UseCases (Pyre, Chapter 1.2, 6.3, 7.1, & 10.1).
- */
 @HiltViewModel
 class CartEditViewModel @Inject constructor(
     private val savedStateHandle: SavedStateHandle,
     private val observeShadeCartById: ObserveShadeCartByIdUseCase,
     private val observeFabricTypes: ObserveFabricTypesUseCase,
+    private val observeCalibrationState: ObserveCalibrationStateUseCase,
+    private val checkDuplicateShade: CheckDuplicateShadeUseCase,
     private val createOrGetShadeCart: CreateOrGetShadeCartUseCase,
     private val saveShadeCartUseCase: SaveShadeCartUseCase,
     private val bitmapProcessor: BitmapProcessor,
     private val textRecognitionGateway: TextRecognitionGateway,
     private val subjectSegmentationGateway: SubjectSegmentationGateway,
     private val swatchDetector: TwoColumnSwatchDetector,
+    private val pinkedSampler: PinkedSwatchSampler,
     private val json: Json,
 ) : ViewModel() {
 
@@ -123,7 +128,6 @@ class CartEditViewModel @Inject constructor(
         refreshSegmentationAvailability()
     }
 
-    /** Decodes a memory-bounded `RGB_565` preview bitmap off the main thread. */
     suspend fun loadPreviewBitmap(imagePath: String): Bitmap? =
         bitmapProcessor.loadRgb565Preview(imagePath)
 
@@ -161,6 +165,11 @@ class CartEditViewModel @Inject constructor(
                 _uiState.update { it.copy(fabricTypes = fabrics) }
             }
         }
+        viewModelScope.launch {
+            observeCalibrationState().collect { cal ->
+                _uiState.update { it.copy(activeCalibrationProfile = cal.activeProfile) }
+            }
+        }
 
         val cartId = savedStateHandle.get<String>(KEY_CART_ID)
         if (!cartId.isNullOrBlank()) {
@@ -180,6 +189,11 @@ class CartEditViewModel @Inject constructor(
                             bboxTop = sw.bboxTop,
                             bboxRight = sw.bboxRight,
                             bboxBottom = sw.bboxBottom,
+                            labL = sw.labL,
+                            labA = sw.labA,
+                            labB = sw.labB,
+                            weaveTag = sw.weaveTag,
+                            sheenScore = sw.sheenScore,
                         )
                     }
                     _uiState.update { state ->
@@ -275,6 +289,22 @@ class CartEditViewModel @Inject constructor(
                 id = UUID.randomUUID().toString(),
                 type = EditStepType.ROTATION,
                 description = "Rotate to ${nextAngle}°",
+                timestampMillis = System.currentTimeMillis(),
+            ),
+        )
+        rerenderNonDestructivePreview(updated)
+    }
+
+    /** A3: Flat-field uneven illumination flattening toggle on the non-destructive EditStack. */
+    fun toggleFlattenLighting() {
+        val currentStack = _uiState.value.editStack
+        val next = !currentStack.flattenLighting
+        val updated = currentStack.copy(
+            flattenLighting = next,
+            history = currentStack.history + EditStep(
+                id = UUID.randomUUID().toString(),
+                type = EditStepType.FLATTEN_LIGHTING,
+                description = if (next) "Flattened lighting" else "Restored original lighting",
                 timestampMillis = System.currentTimeMillis(),
             ),
         )
@@ -410,6 +440,7 @@ class CartEditViewModel @Inject constructor(
 
     fun analyzeCurrentImage() {
         val targetPath = _uiState.value.workingPreviewPath ?: _uiState.value.originalImagePath ?: return
+        val calibration = _uiState.value.activeCalibrationProfile
         viewModelScope.launch {
             _uiState.update { it.copy(isProcessingImage = true, nonBlockingMessage = null) }
             runCatching {
@@ -420,6 +451,7 @@ class CartEditViewModel @Inject constructor(
                     val detected = swatchDetector.detectSwatches(
                         bitmap = bitmap,
                         numericLabels = ocr.numericSwatchLabels,
+                        calibrationProfile = calibration,
                     )
                     Pair(ocr, detected)
                 } finally {
@@ -438,6 +470,11 @@ class CartEditViewModel @Inject constructor(
                         bboxTop = d.outerBounds.top,
                         bboxRight = d.outerBounds.right,
                         bboxBottom = d.outerBounds.bottom,
+                        labL = d.labL,
+                        labA = d.labA,
+                        labB = d.labB,
+                        weaveTag = d.weaveTag,
+                        sheenScore = d.sheenScore,
                     )
                 }
                 val newName = ocr.header.fabricName.ifBlank { _uiState.value.fabricName }
@@ -453,6 +490,11 @@ class CartEditViewModel @Inject constructor(
                 savedStateHandle[KEY_ANALYZED] = true
                 persistSwatches(editableSwatches)
 
+                val duplicates = checkDuplicateShade(
+                    candidateHexes = editableSwatches.map { it.id to it.colorHex },
+                    excludeCartId = _uiState.value.existingCartId,
+                )
+
                 _uiState.update {
                     it.copy(
                         isProcessingImage = false,
@@ -463,10 +505,12 @@ class CartEditViewModel @Inject constructor(
                         widthCmText = newWidth,
                         rawHeaderOcr = ocr.header.rawHeaderText,
                         detectedSwatches = editableSwatches,
+                        selectedOverlaySwatchId = editableSwatches.firstOrNull()?.id,
+                        duplicateWarnings = duplicates,
                         nonBlockingMessage = if (editableSwatches.isEmpty()) {
                             "No swatch regions detected automatically. You can save and add swatches manually."
                         } else {
-                            "Detected ${editableSwatches.size} swatches across two-column layout."
+                            "Detected ${editableSwatches.size} calibrated swatches across two-column layout."
                         },
                     )
                 }
@@ -480,6 +524,88 @@ class CartEditViewModel @Inject constructor(
                     )
                 }
             }
+        }
+    }
+
+    /** A4: Interactive overlay box selection & live pixel re-sampling. */
+    fun selectOverlaySwatch(swatchId: String) {
+        _uiState.update { it.copy(selectedOverlaySwatchId = swatchId) }
+    }
+
+    fun moveSwatchBoxAndResample(swatchId: String, newBounds: NormalizedRect) {
+        val currentList = _uiState.value.detectedSwatches
+        val updatedBounds = currentList.map { sw ->
+            if (sw.id == swatchId) {
+                sw.copy(
+                    bboxLeft = newBounds.left,
+                    bboxTop = newBounds.top,
+                    bboxRight = newBounds.right,
+                    bboxBottom = newBounds.bottom,
+                )
+            } else {
+                sw
+            }
+        }
+        _uiState.update { it.copy(detectedSwatches = updatedBounds) }
+
+        val targetPath = _uiState.value.workingPreviewPath ?: _uiState.value.originalImagePath ?: return
+        val calibration = _uiState.value.activeCalibrationProfile
+        viewModelScope.launch {
+            val bitmap = bitmapProcessor.loadProcessingBitmap(targetPath) ?: return@launch
+            try {
+                val sampled = pinkedSampler.sampleRegion(bitmap, newBounds, calibration)
+                if (sampled != null) {
+                    val resampledList = _uiState.value.detectedSwatches.map { sw ->
+                        if (sw.id == swatchId) {
+                            sw.copy(
+                                colorHex = sampled.hexColor,
+                                colorName = sampled.colorName,
+                                labL = sampled.labL,
+                                labA = sampled.labA,
+                                labB = sampled.labB,
+                                weaveTag = sampled.weaveTag,
+                                sheenScore = sampled.sheenScore,
+                            )
+                        } else {
+                            sw
+                        }
+                    }
+                    persistSwatches(resampledList)
+                    _uiState.update { it.copy(detectedSwatches = resampledList) }
+                }
+            } finally {
+                if (!bitmap.isRecycled) bitmap.recycle()
+            }
+        }
+    }
+
+    fun addManualOverlayBox() {
+        val list = _uiState.value.detectedSwatches
+        val nextNum = ((list.mapNotNull { it.swatchNumber.toIntOrNull() }.maxOrNull() ?: 0) + 1).toString()
+        val box = DetectedSwatchEditable(
+            id = UUID.randomUUID().toString(),
+            swatchNumber = nextNum,
+            colorHex = "#102A71",
+            colorName = "Azhar Navy",
+            bboxLeft = 0.25f,
+            bboxTop = 0.35f,
+            bboxRight = 0.45f,
+            bboxBottom = 0.50f,
+        )
+        val updated = list + box
+        persistSwatches(updated)
+        _uiState.update { it.copy(detectedSwatches = updated, selectedOverlaySwatchId = box.id) }
+        moveSwatchBoxAndResample(box.id, NormalizedRect(box.bboxLeft, box.bboxTop, box.bboxRight, box.bboxBottom))
+    }
+
+    fun removeOverlayBox(swatchId: String) {
+        val updated = _uiState.value.detectedSwatches.filterNot { it.id == swatchId }
+        persistSwatches(updated)
+        _uiState.update {
+            it.copy(
+                detectedSwatches = updated,
+                selectedOverlaySwatchId = updated.firstOrNull()?.id,
+            )
         }
     }
 
@@ -522,6 +648,13 @@ class CartEditViewModel @Inject constructor(
         val stackJson = json.encodeToString(state.editStack)
 
         val swatchInputs = state.detectedSwatches.mapIndexed { idx, sw ->
+            val lab = if (sw.labL != 0.0 || sw.labA != 0.0 || sw.labB != 0.0) {
+                Triple(sw.labL, sw.labA, sw.labB)
+            } else {
+                val c = ColorScience.hexToLab(sw.colorHex)
+                if (c != null) Triple(c.first.toDouble(), c.second.toDouble(), c.third.toDouble())
+                else Triple(0.0, 0.0, 0.0)
+            }
             SwatchInput(
                 id = sw.id,
                 fabricTypeId = state.selectedFabricTypeId ?: "",
@@ -533,6 +666,11 @@ class CartEditViewModel @Inject constructor(
                 bboxTop = sw.bboxTop,
                 bboxRight = sw.bboxRight,
                 bboxBottom = sw.bboxBottom,
+                labL = lab.first,
+                labA = lab.second,
+                labB = lab.third,
+                weaveTag = sw.weaveTag,
+                sheenScore = sw.sheenScore,
             )
         }
 
@@ -565,6 +703,8 @@ class CartEditViewModel @Inject constructor(
                         editedImagePath = state.workingPreviewPath,
                         editStackJson = stackJson,
                         headerOcrRaw = state.rawHeaderOcr,
+                        calibrationProfileId = state.activeCalibrationProfile?.id,
+                        ambientLux = state.activeCalibrationProfile?.ambientLux ?: -1f,
                         swatches = swatchInputs,
                     ),
                 )

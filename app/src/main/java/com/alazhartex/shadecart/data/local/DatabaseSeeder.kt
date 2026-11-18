@@ -6,13 +6,16 @@ import javax.inject.Inject
 import javax.inject.Singleton
 
 /**
- * Seeds authentic Al AzharTex fabric catalog records (FabricType) and warehouse Roll inventory
- * records so swatches detected or manually edited can immediately link to real inventory rows.
+ * Seeds authentic Al AzharTex fabric catalog records (`FabricType`), warehouse `Roll` inventory
+ * records, initial `DyeLotEntity` batches, and `PriceTierEntity` tiers so swatches, QR codes,
+ * dye-lot checks, and pricing tiers work immediately out of the box.
  */
 @Singleton
 class DatabaseSeeder @Inject constructor(
     private val fabricTypeDao: FabricTypeDao,
     private val rollDao: RollDao,
+    private val dyeLotDao: DyeLotDao,
+    private val priceTierDao: PriceTierDao,
 ) {
     suspend fun ensureSeeded() = withContext(Dispatchers.IO) {
         val now = System.currentTimeMillis()
@@ -21,6 +24,12 @@ class DatabaseSeeder @Inject constructor(
         }
         if (rollDao.count() == 0) {
             rollDao.upsertAll(defaultRolls(now))
+        }
+        if (dyeLotDao.count() == 0) {
+            dyeLotDao.upsertAll(defaultDyeLots(now))
+        }
+        if (priceTierDao.count() == 0) {
+            priceTierDao.upsertAll(defaultPriceTiers(now))
         }
     }
 
@@ -83,6 +92,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#102A71",
                 warehouseShed = "wh-alwa",
                 lengthMeters = 480.0,
+                availableMeters = 480.0,
+                lotCode = "LOT-2026-05A",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-SLK-005",
                 status = RollStatus.IN_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -96,6 +109,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#CD1820",
                 warehouseShed = "wh-showroom",
                 lengthMeters = 310.0,
+                availableMeters = 310.0,
+                lotCode = "LOT-2026-07B",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-SLK-007",
                 status = RollStatus.IN_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -109,6 +126,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#0F5132",
                 warehouseShed = "wh-625",
                 lengthMeters = 520.0,
+                availableMeters = 520.0,
+                lotCode = "LOT-2026-11A",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-SLK-011",
                 status = RollStatus.IN_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -122,6 +143,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#D4A017",
                 warehouseShed = "wh-zibda",
                 lengthMeters = 125.0,
+                availableMeters = 38.0,
+                lotCode = "LOT-2026-12A",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-SLK-012",
                 status = RollStatus.LOW_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -135,6 +160,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#187480",
                 warehouseShed = "wh-leon",
                 lengthMeters = 390.0,
+                availableMeters = 390.0,
+                lotCode = "LOT-2026-18A",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-SLK-018",
                 status = RollStatus.IN_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -148,6 +177,10 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#383E4A",
                 warehouseShed = "wh-alwa",
                 lengthMeters = 640.0,
+                availableMeters = 640.0,
+                lotCode = "LOT-2026-03W",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-WRS-003",
                 status = RollStatus.IN_STOCK,
                 version = 1L,
                 updatedAt = now,
@@ -161,8 +194,67 @@ class DatabaseSeeder @Inject constructor(
                 colorHex = "#761D3A",
                 warehouseShed = "wh-azouz",
                 lengthMeters = 215.0,
+                availableMeters = 140.0,
+                lotCode = "LOT-2026-09P",
+                lowStockThresholdMeters = 50.0,
+                qrPayload = "azpallete://roll/RL-PRL-009",
                 status = RollStatus.RESERVED,
                 version = 1L,
+                updatedAt = now,
+            ),
+        )
+
+        fun defaultDyeLots(now: Long = 1_700_000_000_000L): List<DyeLotEntity> = listOf(
+            DyeLotEntity(
+                id = "lot-slk5-a",
+                rollId = "roll-slk-5",
+                lotCode = "LOT-2026-05A",
+                dyeDate = now - 86_400_000L * 5,
+                masterDeltaE = 0.65,
+                operatorName = "Ahmed",
+                notes = "Master approved under D65",
+                version = 1L,
+                updatedAt = now,
+            ),
+            DyeLotEntity(
+                id = "lot-slk7-b",
+                rollId = "roll-slk-7",
+                lotCode = "LOT-2026-07B",
+                dyeDate = now - 86_400_000L * 2,
+                masterDeltaE = 1.15,
+                operatorName = "Hassan",
+                notes = "Reactive dye vat #3",
+                version = 1L,
+                updatedAt = now,
+            ),
+        )
+
+        fun defaultPriceTiers(now: Long = 1_700_000_000_000L): List<PriceTierEntity> = listOf(
+            PriceTierEntity(
+                id = "tier-slk-retail",
+                fabricTypeId = "fab-silk-180",
+                tierName = "Sample / Cut",
+                minMeters = 1.0,
+                pricePerMeter = 18.0,
+                currencyCode = "EGP",
+                updatedAt = now,
+            ),
+            PriceTierEntity(
+                id = "tier-slk-wholesale",
+                fabricTypeId = "fab-silk-180",
+                tierName = "Roll Wholesale",
+                minMeters = 50.0,
+                pricePerMeter = 14.5,
+                currencyCode = "EGP",
+                updatedAt = now,
+            ),
+            PriceTierEntity(
+                id = "tier-slk-factory",
+                fabricTypeId = "fab-silk-180",
+                tierName = "Mill Carton (500m+)",
+                minMeters = 500.0,
+                pricePerMeter = 12.25,
+                currencyCode = "EGP",
                 updatedAt = now,
             ),
         )
